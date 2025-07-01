@@ -2,7 +2,6 @@ import os
 from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_smorest import Api
-from flask_sqlalchemy import SQLAlchemy
 
 def create_app(settings_module: str | None = None):
     """
