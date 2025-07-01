@@ -56,7 +56,7 @@ def create_app(settings_module: str | None = None):
         }
         return jsonify(response), 501
 
-    api = Api(app)
+    api = Api(app) #TODO: Aquí se meterán los recursos de la API, autenticación, prefijo, etc
     
     return app
 
