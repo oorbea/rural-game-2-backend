@@ -2,6 +2,7 @@ import os
 from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_smorest import Api
+from resources.Challenge import blp as ChallengeBlueprint
 
 def create_app(settings_module: str | None = None):
     """
@@ -54,8 +55,12 @@ def create_app(settings_module: str | None = None):
             "status": "Not Implemented"
         }
         return jsonify(response), 501
+    
+    def getApiPrefix(url:str) -> str: return f"{app.config['API_PREFIX']}/{url}"
 
-    api = Api(app) #TODO: Aquí se meterán los recursos de la API, autenticación, prefijo, etc
+    api = Api(app)
+
+    api.register_blueprint(ChallengeBlueprint, url_prefix=getApiPrefix('challenge'))
 
     from db import create_db
     import models
