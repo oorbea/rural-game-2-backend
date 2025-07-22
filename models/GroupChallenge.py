@@ -16,7 +16,6 @@ class GroupChallenge(Challenge):
     
     def to_dict(self) -> GroupChallengeDict:
         return GroupChallengeDict(
-            id=self.id,
             title=self.title,
             description=self.description,
             drinking=self.drinking,

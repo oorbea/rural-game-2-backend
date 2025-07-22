@@ -1,7 +1,7 @@
 from typing import TypedDict
 from db import db
 
-class ChallengeDict(TypedDict):
+class SecretMissionDict(TypedDict):
     title: str
     description: str
     drinking: bool = False
@@ -10,12 +10,11 @@ class ChallengeDict(TypedDict):
     partner_friendly: bool = True
     probability: float = 1.0
     icon: str|None = None
-    skipping: float|None = None
-    voting: bool = False
     prize: int
+    punishment: float
 
-class Challenge(db.Model):
-    __tablename__ = 'challenges'
+class SecretMission(db.Model):
+    __tablename__ = 'secret_missions'
     
     title = db.Column(db.String(100), primary_key=True)
     description = db.Column(db.String(500), nullable=False)
@@ -25,15 +24,14 @@ class Challenge(db.Model):
     partner_friendly = db.Column(db.Boolean, nullable=False, default=True)
     probability = db.Column(db.Float, nullable=False, default=1.0)
     icon = db.Column(db.String(100), nullable=True, default=None)
-    skipping = db.Column(db.Float, nullable=True, default=None)
-    voting = db.Column(db.Boolean, nullable=False, default=False)
     prize = db.Column(db.Integer, nullable=False)
+    punishment = db.Column(db.Float, nullable=False)
 
     def __repr__(self):
-        return f"<Challenge {self.title}>"
+        return f"<Secret Mission {self.title}>"
     
-    def to_dict(self) -> ChallengeDict:
-        return ChallengeDict(
+    def to_dict(self) -> SecretMissionDict:
+        return SecretMissionDict(
             title=self.title,
             description=self.description,
             drinking=self.drinking,
@@ -42,9 +40,8 @@ class Challenge(db.Model):
             partner_friendly=self.partner_friendly,
             probability=self.probability,
             icon=self.icon,
-            skipping=self.skipping,
-            voting=self.voting,
             prize=self.prize,
+            punishment=self.punishment
         )
 
     def __len__(self) -> int:
