@@ -6,3 +6,4 @@ blp = Blueprint('challenge', __name__, description='Challenge related CRUD opera
 @blp.route('')
 class ChallengeCRUD(MethodView):
     """Handles CRUD operations for challenges."""
+    pass
