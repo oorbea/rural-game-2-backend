@@ -30,8 +30,7 @@ API_PREFIX=os.getenv('API_PREFIX', DEFAULT_API_PREFIX)
 API_TITLE=os.getenv('API_TITLE', DEFAULT_API_TITLE)
 API_VERSION=os.getenv('API_VERSION', VERSION)
 SWAGGER_URL=os.getenv('SWAGGER_URL', DEFAULT_SWAGGER_URL)
-DEBUG = os.getenv('FLASK_DEBUG', DEFAULT_DEBUG)
-DEBUG = str(DEBUG).lower() in ['true', '1', 't', 'y', 'yes']
+DEBUG = str(os.getenv('DEBUG', DEFAULT_DEBUG)).lower() in ('t', 'true', '1', 'y', 'yes')
 PORT = int(os.getenv('PORT', DEFAULT_PORT))
 HOST_NAME = os.getenv('HOST_NAME', f'http://localhost:{PORT}')
 
