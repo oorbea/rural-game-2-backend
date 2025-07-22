@@ -30,3 +30,9 @@ class SecretMissionSchema(Schema):
     icon = fields.String(required=False, allow_none=True, default=None)
     prize = fields.Integer(required=True)
     punishment = fields.Float(required=True)
+
+class RoleSchema(Schema):
+    """Schema for validating role data."""
+    title = fields.String(required=True, validate=validate.Length(min=1, max=100))
+    description = fields.String(required=True, validate=validate.Length(min=1, max=500))
+    quantity_per_game = fields.Integer(required=False, allow_none=True, default=None)

@@ -46,6 +46,6 @@ class SecretMission(db.Model):
 
     def __len__(self) -> int:
         """
-        Returns the length of the challenge description.
+        Returns the length of the secret mission description.
         """
         return len(self.description)
