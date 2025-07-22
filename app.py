@@ -56,18 +56,17 @@ def create_app(settings_module: str | None = None):
         return jsonify(response), 501
 
     api = Api(app) #TODO: Aquí se meterán los recursos de la API, autenticación, prefijo, etc
+
+    from db import create_db
+    import models
+
+    with app.app_context():
+        db = create_db(app)
+        db.create_all()
     
     return app
 
 app = create_app(os.getenv('SETTINGS_MODULE', None))
 
-if __name__ == "__main__":
-
-    with app.app_context():
-        from db import create_db
-        import models
-
-        db = create_db(app)
-        db.create_all()
-    
+if __name__ == "__main__":    
     app.run(threaded=True, host="0.0.0.0", port=app.config.get('PORT', 5000), debug=app.config.get('DEBUG', False), use_reloader=app.config.get('DEBUG', False))
