@@ -5,15 +5,15 @@ class ChallengeDict(TypedDict):
     id: int
     title: str
     description: str
-    drinking: bool
-    sex: bool
-    smoking: bool
-    partner_friendly: bool
-    probability: float
-    icon: str
-    skipping: int
-    voting: bool
-    prize: int
+    drinking: bool = False
+    sex: bool = False
+    smoking: bool = False
+    partner_friendly: bool = True
+    probability: float = 1.0
+    icon: str|None = None
+    skipping: int|None = None
+    voting: bool = False
+    prize: int = 0
 
 class Challenge(db.Model):
     __tablename__ = 'challenges'

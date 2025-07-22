@@ -13,3 +13,7 @@ class ChallengeSchema(Schema):
     skipping = fields.Integer(required=False, allow_none=True, default=None)
     voting = fields.Boolean(required=False, default=False)
     prize = fields.Integer(required=False, default=0)
+
+class GroupChallengeSchema(ChallengeSchema):
+    """Schema for validating group challenge data."""
+    pass
