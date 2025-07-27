@@ -37,3 +37,4 @@ HOST_NAME = os.getenv('HOST_NAME', f'http://localhost:{PORT}')
 #------------------------------
 
 ALLOWED_PICTURE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+PROFILE_PICTURES_DIR = "public/ChallengePics"

@@ -30,6 +30,10 @@ class GetChallengeSchema(Schema):
     voting = fields.Boolean(required=False)
     prize = fields.Integer(required=False)
 
+class TitleChallengeSchema(Schema):
+    """Schema for validating challenge data."""
+    title = fields.String(required=True, validate=validate.Length(min=1, max=100))
+    
 class GroupChallengeSchema(ChallengeSchema):
     """Schema for validating group challenge data."""
     pass
