@@ -3,6 +3,7 @@ from flask_smorest import Blueprint, abort
 from flask.views import MethodView
 from flask import Response, jsonify, request
 from marshmallow import ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_
 from db import db 
 from models.Challenge import Challenge
@@ -87,22 +88,21 @@ class ChallengeCRUD(MethodView):
         try:
             data = ChallengeSchema().load(data) 
             challenge = Challenge(**data)
-            db.session.add(challenge)
-            try: 
-                db.session.commit()
-                return Response(status=201)
-            
-            except db.exc.IntegrityError as error:
-                db.session.rollback()
-                traceback.print_exc()
-                abort(409, message='Challenge with the same title already exists.')
+            db.session.add(challenge) 
+            db.session.commit()
+            return Response(status=201)
 
         except ValidationError as error:
             traceback.print_exc()
             abort(400, message=str(error))
 
+        except IntegrityError as error:
+            db.session.rollback()
+            abort(409, message='Challenge with the same title already exists.')
+
         except Exception as error:
             traceback.print_exc()
+            db.session.rollback()
             abort(500, message='Internal server error.')
 
 
