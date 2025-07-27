@@ -1,9 +1,10 @@
 import traceback
 from flask_smorest import Blueprint, abort
 from flask.views import MethodView
-from flask import jsonify, request
+from flask import Response, jsonify, request
 from marshmallow import ValidationError
 from sqlalchemy import or_
+from db import db 
 from models.Challenge import Challenge
 from schemas import ChallengeSchema, GetChallengeSchema
 
@@ -69,6 +70,33 @@ class ChallengeCRUD(MethodView):
                 challenges = Challenge.query.all()
             return jsonify([challenge.to_dict() for challenge in challenges])
         
+        except ValidationError as error:
+            traceback.print_exc()
+            abort(400, message=str(error))
+
+        except Exception as error:
+            traceback.print_exc()
+            abort(500, message='Internal server error.')
+
+    @blp.arguments(ChallengeSchema)
+    @blp.response(201, description='Challenge created.')
+    @blp.response(400, description='Bad request')
+    @blp.response(409, description='Conflict.')
+    @blp.response(500, description='Internal server error.')
+    def post(self, data): 
+        try:
+            data = ChallengeSchema().load(data) 
+            challenge = Challenge(**data)
+            db.session.add(challenge)
+            try: 
+                db.session.commit()
+                return Response(status=201)
+            
+            except db.exc.IntegrityError as error:
+                db.session.rollback()
+                traceback.print_exc()
+                abort(409, message='Challenge with the same title already exists.')
+
         except ValidationError as error:
             traceback.print_exc()
             abort(400, message=str(error))
