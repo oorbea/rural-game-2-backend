@@ -85,25 +85,21 @@ def create_app(settings_module: str | None = None):
             tokenId = jwt_payload['token']
             jti = jwt_payload['jti']
             identity = jwt_payload['sub']
-                        
-            print("jti", jti)
-                        
+            
             try:
-                session_token = AuthToken(db).get(tokenId)
+                session_token = AuthToken.query.get(tokenId)
             except SQLAlchemyError as e:
                 traceback.print_exc()
                 abort(500, message = str(e))
             
-            print("session_token", session_token)
-            
             if not session_token: return True
             
-            return not (session_token['jti'] == jti and session_token["identity"] == identity)
+            return not (session_token.jti == jti and session_token.user_id == identity)
             
         except KeyError:
             return True
             
-    ##JWT ERRORS
+    ## JWT ERRORS
     
     @jwt.invalid_token_loader
     def invalid_token_callback(error):                
@@ -116,25 +112,19 @@ def create_app(settings_module: str | None = None):
     
     @jwt.expired_token_loader
     def expired_token_callback(jwt_header, jwt_payload):
-        try:
-            AuthToken(db).delete(jwt_payload['token'])
-        except Exception as e:
-            traceback.print_exc()
-            abort(500, message = str(e))
+        db.session.delete(AuthToken.query.get(jwt_payload['token']))
+        db.session.commit()
         return jsonify({"message": "The token has expired.", "error": "token_expired"}), 401
     
     @jwt.unauthorized_loader
     def missing_token_callback(error):
-        headers = request.headers
-        for header in headers:
-            print(header)
-        return jsonify({"message": error, "error": "token_unauthorized"}), 401
+        return jsonify({"message": "Request does not contain an access token.", "error": "token_unauthorized"}), 401
 
     @jwt.revoked_token_loader
     def revoked_token_callback(jwt_header, jwt_payload):
         return jsonify({"message": "The token has been revoked.", "error": "token_revoked"}), 401
     
-    ##NotImplementedError
+    ## NotImplementedError
     
     @app.errorhandler(NotImplementedError)
     def handle_not_implemented_error(error):
