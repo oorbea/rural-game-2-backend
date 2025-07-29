@@ -26,7 +26,7 @@ class AuthToken(db.Model):
 
 
     def __repr__(self):
-        return f"<AuthToken {self.jti}>"
+        return f"<AuthToken {self.id} with JTI {self.jti}>"
 
     def to_dict(self) -> AuthTokenDict:
         return AuthTokenDict(
