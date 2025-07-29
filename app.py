@@ -6,6 +6,7 @@ from flask_smorest import Api
 from flask_jwt_extended import JWTManager
 from sqlalchemy.exc import SQLAlchemyError
 
+from models.AuthToken import AuthToken
 from resources.Challenge import blp as ChallengeBlueprint
 
 def create_app(settings_module: str | None = None):
@@ -88,7 +89,7 @@ def create_app(settings_module: str | None = None):
             print("jti", jti)
                         
             try:
-                session_token = db.getTokenModel().get(tokenId)
+                session_token = AuthToken(db).get(tokenId)
             except SQLAlchemyError as e:
                 traceback.print_exc()
                 abort(500, message = str(e))
@@ -116,7 +117,7 @@ def create_app(settings_module: str | None = None):
     @jwt.expired_token_loader
     def expired_token_callback(jwt_header, jwt_payload):
         try:
-            db.getTokenModel().delete(jwt_payload['token'])
+            AuthToken(db).delete(jwt_payload['token'])
         except Exception as e:
             traceback.print_exc()
             abort(500, message = str(e))
