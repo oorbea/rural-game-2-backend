@@ -1,8 +1,10 @@
 @echo off
 setlocal
 
-set SERVICE=backend
-set DETACH=-d
+REM === Configuración ===
+set "SERVICE_API=flask_api"
+set "SERVICE_PMA=phpmyadmin"
+set "DETACH=-d"
 
 REM 1) Comprobar si Docker está instalado
 where docker >nul 2>&1
@@ -31,22 +33,19 @@ IF ERRORLEVEL 1 (
     exit /b 1
 )
 
-REM 4) Verificar que el servicio backend existe en el compose
-docker-compose config --services | findstr /R /C:"^%SERVICE%$" >nul
+REM 4) Levantar phpMyAdmin y el backend en segundo plano (sin reconstruir)
+echo Starting "%SERVICE_PMA%" and "%SERVICE_API%" services in background...
+docker-compose up %DETACH% --no-build %SERVICE_PMA% %SERVICE_API%
 IF ERRORLEVEL 1 (
-    echo El servicio "%SERVICE%" no existe en docker-compose.yml.
+    echo ERROR: There was a problem starting the services.
     pause
     exit /b 1
 )
 
-REM 5) Levantar el backend
-echo Starting "%SERVICE%" service...
-docker-compose up %DETACH% %SERVICE%
-IF %ERRORLEVEL% EQU 0 (
-    echo Service "%SERVICE%" started successfully!
-) ELSE (
-    echo ERROR: There was a problem starting the "%SERVICE%" service.
-)
+echo Services started successfully!
+echo Showing ONLY "%SERVICE_API%" logs (press Ctrl+C to stop)...
+echo.
+docker-compose logs -f %SERVICE_API%
 
 endlocal
 pause

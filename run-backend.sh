@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVICE="flask_api"
-DETACH="-d"
+# Ir al directorio del script (donde está el compose)
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
-# 1) Comprobar Docker
+# === Configuración ===
+SERVICE_API="${SERVICE_API:-flask_api}"
+SERVICE_PMA="${SERVICE_PMA:-phpmyadmin}"
+DETACH="${DETACH:--d}"      # dejar vacío para primer plano
+
+# 1) Comprobar Docker instalado
 if ! command -v docker >/dev/null 2>&1; then
   echo "Docker no está instalado o no está en el PATH."
-  echo "Instalación: https://docs.docker.com/engine/install/"
+  echo "Instálalo: https://docs.docker.com/engine/install/"
   exit 1
 fi
 
-# 2) Comprobar que el daemon de Docker está activo
+# 2) Comprobar que el daemon de Docker está en ejecución
 if ! docker info >/dev/null 2>&1; then
   echo "Docker no se está ejecutando. Arráncalo y vuelve a intentarlo."
   exit 1
@@ -27,25 +32,16 @@ else
   exit 1
 fi
 
-# 4) Validar que hay un docker-compose.yml válido en el directorio
-if ! "${COMPOSE[@]}" config >/dev/null 2>&1; then
-  echo "No se encontró un docker-compose.yml válido en el directorio actual."
+# 4) Levantar phpMyAdmin y el backend en segundo plano (sin reconstruir)
+echo "Starting \"$SERVICE_PMA\" and \"$SERVICE_API\" services in background..."
+if ! "${COMPOSE[@]}" up ${DETACH} --no-build "$SERVICE_PMA" "$SERVICE_API"; then
+  echo "ERROR: There was a problem starting the services."
   exit 1
 fi
 
-# 5) Verificar que el servicio backend existe
-if ! "${COMPOSE[@]}" config --services | grep -Fxq "$SERVICE"; then
-  echo "El servicio \"$SERVICE\" no existe en docker-compose.yml."
-  exit 1
-fi
+echo "Services started successfully!"
+echo "Showing ONLY \"$SERVICE_API\" logs (press Ctrl+C to stop)..."
+echo
 
-# 6) Levantar backend y dependencias en segundo plano
-echo "Levantando \"$SERVICE\" y dependencias (sin reconstruir imágenes)..."
-if "${COMPOSE[@]}" up $DETACH --no-build "$SERVICE"; then
-  echo "Servicio \"$SERVICE\" iniciado en segundo plano."
-  echo "Logs: ${COMPOSE[*]} logs -f $SERVICE"
-else
-  echo "ERROR: No se pudo iniciar \"$SERVICE\"."
-  echo "Si la imagen no existe, ejecuta primero el script de build para crearla."
-  exit 1
-fi
+# 5) Mostrar únicamente los logs de flask_api
+exec "${COMPOSE[@]}" logs -f "$SERVICE_API"
