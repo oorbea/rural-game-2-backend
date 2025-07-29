@@ -12,9 +12,18 @@ class AuthToken(db.Model):
     __tablename__ = 'auth_tokens'
     
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    jti = db.Column(db.String(80), nullable=False, unique=True)
-    identity = db.Column(db.String(32), nullable=False)
-    role = db.Column(db.Enum(AuthRoleEnum), nullable=False, default=AuthRoleEnum.USER)
+    jti = db.Column(db.String(64), nullable=False, unique=True)
+    identity = db.Column(db.String(32), nullable=False, index=True)
+    role = db.Column(
+        db.Enum(AuthRoleEnum,
+                values_callable=lambda enum_class: [e.value for e in enum_class],
+                name="auth_role_enum",
+                native_enum=False,
+                validate_strings=True),
+        nullable=False,
+        default=AuthRoleEnum.USER.value
+    )
+
 
     def __repr__(self):
         return f"<AuthToken {self.jti}>"
@@ -24,5 +33,5 @@ class AuthToken(db.Model):
             id=self.id,
             jti=self.jti,
             identity=self.identity,
-            role=self.role,
+            role=self.role.value,
         )
