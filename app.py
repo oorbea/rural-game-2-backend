@@ -52,15 +52,6 @@ def create_app(settings_module: str | None = None):
         
     app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024
     
-    @app.errorhandler(NotImplementedError)
-    def handle_not_implemented_error(error):
-        response = {
-            "error_message": str(error),
-            "code": 501,
-            "status": "Not Implemented"
-        }
-        return jsonify(response), 501
-    
     def getApiPrefix(url:str) -> str: return f"{app.config['API_PREFIX']}/{url}"
 
     api = Api(app)
