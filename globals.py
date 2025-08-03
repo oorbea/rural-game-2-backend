@@ -38,3 +38,7 @@ HOST_NAME = os.getenv('HOST_NAME', f'http://localhost:{PORT}')
 
 ALLOWED_PICTURE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 PROFILE_PICTURES_DIR = "public/ChallengePics"
+
+JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')
+ADMINS = os.getenv('ADMINS', '').split(',')
+USERS = ADMINS.copy() + os.getenv('USERS', '').split(',')

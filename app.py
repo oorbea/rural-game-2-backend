@@ -1,12 +1,9 @@
 import os
-import traceback
-from flask import Flask, abort, jsonify
+from flask import Flask, jsonify
 from flask_cors import CORS
-from flask_smorest import Api
 from flask_jwt_extended import JWTManager
-from sqlalchemy.exc import SQLAlchemyError
+from flask_smorest import Api
 
-from models.AuthToken import AuthToken
 from resources.Challenge import blp as ChallengeBlueprint
 
 def create_app(settings_module: str | None = None):
@@ -51,10 +48,20 @@ def create_app(settings_module: str | None = None):
     app.config['OPENAPI_SWAGGER_UI_URL'] = 'https://cdn.jsdelivr.net/npm/swagger-ui-dist/'
         
     app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024
+
+    app.config['JWT_TOKEN_LOCATION'] = os.getenv('JWT_TOKEN_LOCATION', 'headers')
+    app.config['JWT_HEADER_NAME'] = os.getenv('JWT_HEADER_NAME', 'Authorization')
+    app.config['JWT_HEADER_TYPE'] = os.getenv('JWT_HEADER_TYPE', 'Bearer')
     
     def getApiPrefix(url:str) -> str: return f"{app.config['API_PREFIX']}/{url}"
 
+    jwt = JWTManager(app)
+
     api = Api(app)
+
+    api.spec.components.security_scheme(
+        'jwt', {'type': 'http', 'scheme': 'bearer', 'bearerFormat': 'JWT', 'x-bearerInfoFunc': 'app.decode_token'}
+    )
 
     api.register_blueprint(ChallengeBlueprint, url_prefix=getApiPrefix('challenge'))
 
@@ -64,56 +71,6 @@ def create_app(settings_module: str | None = None):
     with app.app_context():
         db = create_db(app)
         db.create_all()
-        
-    jwt = JWTManager(app)
-    
-    ##JWT CHECK
-    
-    @jwt.token_in_blocklist_loader
-    def check_if_token_in_blocklist(jwt_header, jwt_payload):
-        
-        try:
-            tokenId = jwt_payload['token']
-            jti = jwt_payload['jti']
-            identity = jwt_payload['sub']
-            
-            try:
-                session_token = AuthToken.query.get(tokenId)
-            except SQLAlchemyError as e:
-                traceback.print_exc()
-                abort(500, message = str(e))
-            
-            if not session_token: return True
-            
-            return not (session_token.jti == jti and session_token.user_id == identity)
-            
-        except KeyError:
-            return True
-            
-    ## JWT ERRORS
-    
-    @jwt.invalid_token_loader
-    def invalid_token_callback(error):                
-        return jsonify({"message": error, "error": "invalid_token"}), 401
-    
-    @jwt.needs_fresh_token_loader
-    def token_not_fresh_callback(jwt_header, jwt_payload):
-        return jsonify({"message": "The token is not fresh.", "error": "fresh_token_required"}), 401
-    
-    
-    @jwt.expired_token_loader
-    def expired_token_callback(jwt_header, jwt_payload):
-        db.session.delete(AuthToken.query.get(jwt_payload['token']))
-        db.session.commit()
-        return jsonify({"message": "The token has expired.", "error": "token_expired"}), 401
-    
-    @jwt.unauthorized_loader
-    def missing_token_callback(error):
-        return jsonify({"message": "Request does not contain an access token.", "error": "token_unauthorized"}), 401
-
-    @jwt.revoked_token_loader
-    def revoked_token_callback(jwt_header, jwt_payload):
-        return jsonify({"message": "The token has been revoked.", "error": "token_revoked"}), 401
     
     ## NotImplementedError
     
