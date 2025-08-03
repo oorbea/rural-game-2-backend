@@ -263,10 +263,8 @@ class ChallengeImg(MethodView):
     @admin_required 
     def patch(self, querydata):
         try:
-            if "icon" not in request.files:
-                abort(400, message='Picture needed.')
 
-            picture = request.files.get("icon")
+            picture = request.files["icon"]
             originalfilename = picture.filename.replace(" ", "_")
             newfilename = secure_filename(f"{str(datetime.datetime.now()).replace(" ", "_")}_{originalfilename}") 
             if not self.__allowfilename(newfilename):
@@ -288,6 +286,10 @@ class ChallengeImg(MethodView):
         except ValidationError as error:
             traceback.print_exc()
             abort(400, message=str(error))
+
+        except KeyError as error:
+            traceback.print_exc()
+            abort(400, message='Picture needed.')
 
         except NotFound as error:
             abort(404, message='Title not found.')
