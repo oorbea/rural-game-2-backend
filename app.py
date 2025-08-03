@@ -1,6 +1,6 @@
 import os
 import traceback
-from flask import Flask, abort, jsonify, request
+from flask import Flask, abort, jsonify
 from flask_cors import CORS
 from flask_smorest import Api
 from flask_jwt_extended import JWTManager
