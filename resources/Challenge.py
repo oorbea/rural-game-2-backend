@@ -95,7 +95,7 @@ class ChallengeCRUD(MethodView):
     @blp.response(403, description='You do not have permission for this operation')
     @blp.response(409, description='Conflict.')
     @blp.response(500, description='Internal server error.')
-    @login_required
+    @admin_required
     def post(self, data): 
         try:
             data = ChallengeSchema().load(data) 
@@ -125,7 +125,7 @@ class ChallengeCRUD(MethodView):
     @blp.response(403, description='You do not have permission for this operation')
     @blp.response(404, description='Title not found.')
     @blp.response(500, description='Internal server error.')
-    @login_required
+    @admin_required
     def put(self, bodydata, querydata):
         try:
             querydata = TitleChallengeSchema().load(querydata) 
@@ -160,7 +160,7 @@ class ChallengeCRUD(MethodView):
     @blp.response(403, description='You do not have permission for this operation')
     @blp.response(404, description='Title not found.')
     @blp.response(500, description='Internal server error.')
-    @login_required
+    @admin_required 
     def patch(self, bodydata, querydata):
         try:
             querydata = TitleChallengeSchema().load(querydata) 
@@ -260,7 +260,7 @@ class ChallengeImg(MethodView):
     @blp.response(403, description='You do not have permission for this operation')
     @blp.response(404, description='Title not found.')
     @blp.response(500, description='Internal server error.')
-    @login_required
+    @admin_required 
     def patch(self, querydata):
         try:
             if "icon" not in request.files:
