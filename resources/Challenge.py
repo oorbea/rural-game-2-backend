@@ -222,7 +222,7 @@ class ChallengeCRUD(MethodView):
 
 @blp.route('icon')
 class ChallengeImg(MethodView):
-    """ """
+    """Handles challenge icon upload and retrieval."""
     def __allowfilename(self, filename: str) -> bool: 
         if "." not in filename:
             return False
