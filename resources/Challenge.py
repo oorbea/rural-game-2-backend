@@ -23,6 +23,8 @@ class ChallengeCRUD(MethodView):
     @blp.arguments(GetChallengeSchema, location='query')
     @blp.response(200, ChallengeSchema(many=True))
     @blp.response(400, description='Bad request')
+    @blp.response(401, description='Invalid token')
+    @blp.response(403, description='You do not have permission for this operation')
     @blp.response(500, description='Internal server error.')
     @login_required
     def get(self, data):
@@ -89,6 +91,8 @@ class ChallengeCRUD(MethodView):
     @blp.arguments(ChallengeSchema)
     @blp.response(201, description='Challenge created.')
     @blp.response(400, description='Bad request')
+    @blp.response(401, description='Invalid token')
+    @blp.response(403, description='You do not have permission for this operation')
     @blp.response(409, description='Conflict.')
     @blp.response(500, description='Internal server error.')
     @login_required
@@ -117,6 +121,8 @@ class ChallengeCRUD(MethodView):
     @blp.arguments(TitleChallengeSchema, location='query')
     @blp.response(204, description='Challenge updated.')
     @blp.response(400, description='Bad request')
+    @blp.response(401, description='Invalid token')
+    @blp.response(403, description='You do not have permission for this operation')
     @blp.response(404, description='Title not found.')
     @blp.response(500, description='Internal server error.')
     @login_required
@@ -150,6 +156,8 @@ class ChallengeCRUD(MethodView):
     @blp.arguments(TitleChallengeSchema, location='query')
     @blp.response(200, ChallengeSchema, description='Challenge updated.')
     @blp.response(400, description='Bad request')
+    @blp.response(401, description='Invalid token')
+    @blp.response(403, description='You do not have permission for this operation')
     @blp.response(404, description='Title not found.')
     @blp.response(500, description='Internal server error.')
     @login_required
@@ -183,6 +191,8 @@ class ChallengeCRUD(MethodView):
     @blp.arguments(TitleChallengeSchema, location='query')
     @blp.response(204, description='Challenge deleted.')
     @blp.response(400, description='Bad request')
+    @blp.response(401, description='Invalid token')
+    @blp.response(403, description='You do not have permission for this operation')
     @blp.response(404, description='Title not found.')
     @blp.response(500, description='Internal server error.')
     @admin_required
@@ -246,6 +256,8 @@ class ChallengeImg(MethodView):
     @blp.arguments(TitleChallengeSchema, location='query')
     @blp.response(200, ChallengeSchema, description='Challenge updated.')
     @blp.response(400, description='Bad request')
+    @blp.response(401, description='Invalid token')
+    @blp.response(403, description='You do not have permission for this operation')
     @blp.response(404, description='Title not found.')
     @blp.response(500, description='Internal server error.')
     @login_required
@@ -290,6 +302,8 @@ class ChallengeImg(MethodView):
     @blp.response(200, description='Icon found.')
     @blp.response(204, description='Icon not found.')
     @blp.response(400, description='Bad request')
+    @blp.response(401, description='Invalid token')
+    @blp.response(403, description='You do not have permission for this operation')
     @blp.response(404, description='Challenge not found.')
     @blp.response(500, description='Internal server error.')
     @login_required
