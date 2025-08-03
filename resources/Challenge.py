@@ -2,9 +2,9 @@ import datetime
 import os
 import traceback
 from helpers.auth.decorators import admin_required, login_required
-from flask_smorest import Blueprint
+from flask_smorest import Blueprint, abort
 from flask.views import MethodView
-from flask import Response, current_app, jsonify, request, abort, send_from_directory
+from flask import Response, current_app, jsonify, request, send_from_directory
 from marshmallow import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_
@@ -82,11 +82,11 @@ class ChallengeCRUD(MethodView):
         
         except ValidationError as error:
             traceback.print_exc()
-            abort(400, description=str(error))
+            abort(400, message=str(error))
 
         except Exception as error:
             traceback.print_exc()
-            abort(500, description='Internal server error.')
+            abort(500, message='Internal server error.')
 
     @blp.arguments(ChallengeSchema)
     @blp.response(201, description='Challenge created.')
@@ -106,16 +106,16 @@ class ChallengeCRUD(MethodView):
 
         except ValidationError as error:
             traceback.print_exc()
-            abort(400, description=str(error))
+            abort(400, message=str(error))
 
         except IntegrityError as error:
             db.session.rollback()
-            abort(409, description='Challenge with the same title already exists.')
+            abort(409, message='Challenge with the same title already exists.')
 
         except Exception as error:
             traceback.print_exc()
             db.session.rollback()
-            abort(500, description='Internal server error.')
+            abort(500, message='Internal server error.')
 
     @blp.arguments(ChallengeSchema)
     @blp.arguments(TitleChallengeSchema, location='query')
@@ -138,19 +138,19 @@ class ChallengeCRUD(MethodView):
                 db.session.commit()
                 return Response(status=204)
             else:
-                abort(404, description='Title not found.')
+                abort(404, message='Title not found.')
 
         except ValidationError as error:
             traceback.print_exc()
-            abort(400, description=str(error))
+            abort(400, message=str(error))
 
         except NotFound as error:
-            abort(404, description='Title not found.')
+            abort(404, message='Title not found.')
 
         except Exception as error:
             traceback.print_exc()
             db.session.rollback()
-            abort(500, description='Internal server error.')
+            abort(500, message='Internal server error.')
 
     @blp.arguments(GetChallengeSchema)
     @blp.arguments(TitleChallengeSchema, location='query')
@@ -173,19 +173,19 @@ class ChallengeCRUD(MethodView):
                 db.session.commit()
                 return jsonify(challenge.to_dict()) 
             else:
-                abort(404, description='Title not found.')
+                abort(404, message='Title not found.')
         
         except ValidationError as error:
             traceback.print_exc()
-            abort(400, description=str(error))
+            abort(400, message=str(error))
 
         except NotFound as error:
-            abort(404, description='Title not found.')
+            abort(404, message='Title not found.')
 
         except Exception as error:
             traceback.print_exc()
             db.session.rollback()
-            abort(500, description='Internal server error.')
+            abort(500, message='Internal server error.')
 
 
     @blp.arguments(TitleChallengeSchema, location='query')
@@ -205,19 +205,19 @@ class ChallengeCRUD(MethodView):
                 db.session.commit()
                 return Response(status=204)
             else:
-                abort(404, description='Title not found.')
+                abort(404, message='Title not found.')
 
         except ValidationError as error:
             traceback.print_exc()
-            abort(400, description=str(error))
+            abort(400, message=str(error))
 
         except NotFound as error:
-            abort(404, description='Title not found.')
+            abort(404, message='Title not found.')
 
         except Exception as error:
             traceback.print_exc()
             db.session.rollback()
-            abort(500, description='Internal server error.')
+            abort(500, message='Internal server error.')
 
 
 @blp.route('icon')
@@ -264,13 +264,13 @@ class ChallengeImg(MethodView):
     def patch(self, querydata):
         try:
             if "icon" not in request.files:
-                abort(400, description='Picture needed.')
+                abort(400, message='Picture needed.')
 
             picture = request.files.get("icon")
             originalfilename = picture.filename.replace(" ", "_")
             newfilename = secure_filename(f"{str(datetime.datetime.now()).replace(" ", "_")}_{originalfilename}") 
             if not self.__allowfilename(newfilename):
-                abort(400, description='Picture.')
+                abort(400, message='Picture.')
 
             querydata = TitleChallengeSchema().load(querydata) 
             challenge = Challenge.query.get(querydata.get("title"))
@@ -283,19 +283,19 @@ class ChallengeImg(MethodView):
                 db.session.commit()
                 return jsonify(challenge.to_dict()) 
             else:
-                abort(404, description='Title not found.')
+                abort(404, message='Title not found.')
         
         except ValidationError as error:
             traceback.print_exc()
-            abort(400, description=str(error))
+            abort(400, message=str(error))
 
         except NotFound as error:
-            abort(404, description='Title not found.')
+            abort(404, message='Title not found.')
 
         except Exception as error:
             traceback.print_exc()
             db.session.rollback()
-            abort(500, description='Internal server error.')
+            abort(500, message='Internal server error.')
 
     
     @blp.arguments(TitleChallengeSchema, location='query')
@@ -312,30 +312,30 @@ class ChallengeImg(MethodView):
             data = GetChallengeSchema().load(data)
             getTitle = data.get('title')
             if getTitle is None :
-                abort(400, description='Title is required.')
+                abort(400, message='Title is required.')
             challenge = Challenge.query.get(getTitle)
             if challenge is None:
-                abort(404, description='Challenge not found.')
+                abort(404, message='Challenge not found.')
             if challenge.icon is None:
                 return Response(status=204)  # No content if no icon is set
             else:
                 upload_dir = current_app.config.get('PROFILE_PICTURES_DIR', PROFILE_PICTURES_DIR)
                 icon_path = os.path.join(upload_dir, challenge.icon)
                 if not os.path.exists(icon_path):
-                    abort(404, description='Icon file not found.')
+                    abort(404, message='Icon file not found.')
                 return send_from_directory(upload_dir, challenge.icon, as_attachment=False)
                 
         except ValidationError as error:
             traceback.print_exc()
-            abort(400, description=str(error))
+            abort(400, message=str(error))
 
         except NotFound as error:
-            abort(404, description='Challenge not found.')
+            abort(404, message='Challenge not found.')
         
         except Exception as error:
             traceback.print_exc()
             db.session.rollback()
-            abort(500, description='Internal server error.')
+            abort(500, message='Internal server error.')
         
 
             
