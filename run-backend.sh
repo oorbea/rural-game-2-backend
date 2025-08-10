@@ -6,7 +6,6 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 # === Configuración ===
 SERVICE_API="${SERVICE_API:-flask_api}"
-SERVICE_PMA="${SERVICE_PMA:-phpmyadmin}"
 DETACH="${DETACH:--d}"      # dejar vacío para primer plano
 
 # 1) Comprobar Docker instalado
@@ -33,8 +32,8 @@ else
 fi
 
 # 4) Levantar phpMyAdmin y el backend en segundo plano (sin reconstruir)
-echo "Starting \"$SERVICE_PMA\" and \"$SERVICE_API\" services in background..."
-if ! "${COMPOSE[@]}" up ${DETACH} --no-build "$SERVICE_PMA" "$SERVICE_API"; then
+echo "Starting \"$SERVICE_API\" services in background..."
+if ! "${COMPOSE[@]}" up ${DETACH} --no-build "$SERVICE_API"; then
   echo "ERROR: There was a problem starting the services."
   exit 1
 fi

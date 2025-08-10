@@ -1,3 +1,3 @@
-from .Challenge import Challenge
-from .GroupChallenge import GroupChallenge
-from .SecretMission import SecretMission
+from models.Challenge import Challenge
+from models.GroupChallenge import GroupChallenge
+from models.SecretMission import SecretMission

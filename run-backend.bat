@@ -3,7 +3,6 @@ setlocal
 
 REM === Configuración ===
 set "SERVICE_API=flask_api"
-set "SERVICE_PMA=phpmyadmin"
 set "DETACH=-d"
 
 REM 1) Comprobar si Docker está instalado
@@ -34,8 +33,8 @@ IF ERRORLEVEL 1 (
 )
 
 REM 4) Levantar phpMyAdmin y el backend en segundo plano (sin reconstruir)
-echo Starting "%SERVICE_PMA%" and "%SERVICE_API%" services in background...
-docker-compose up %DETACH% --no-build %SERVICE_PMA% %SERVICE_API%
+echo Starting "%SERVICE_API%" services in background...
+docker-compose up %DETACH% --no-build %SERVICE_API%
 IF ERRORLEVEL 1 (
     echo ERROR: There was a problem starting the services.
     pause

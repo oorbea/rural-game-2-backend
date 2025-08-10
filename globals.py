@@ -23,6 +23,11 @@ DB_HOST = os.getenv('DB_HOST')
 DB_PORT = os.getenv('DB_PORT')
 DB_NAME = os.getenv('DB_NAME')
 
+DB_SSL = os.getenv("DB_SSL", "false").lower() in ('t', 'true', '1', 'y', 'yes')
+DB_SSL_CA = os.getenv("DB_SSL_CA")
+
+DB_AUTO_MIGRATE = os.getenv("DB_AUTO_MIGRATE", "true").lower() in ('t', 'true', '1', 'y', 'yes')
+
 #------------------------------
 
 VERSION_ENDPOINT = os.getenv('VERSION_ENDPOINT', DEFAULT_VERSION_ENDPOINT)
@@ -40,5 +45,9 @@ ALLOWED_PICTURE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 PROFILE_PICTURES_DIR = "public/ChallengePics"
 
 JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')
+JWT_TOKEN_LOCATION = os.getenv('JWT_TOKEN_LOCATION', 'headers')
+JWT_HEADER_NAME = os.getenv('JWT_HEADER_NAME', 'Authorization')
+JWT_HEADER_TYPE = os.getenv('JWT_HEADER_TYPE', 'Bearer')
+
 ADMINS = os.getenv('ADMINS', '').split(',')
 USERS = ADMINS.copy() + os.getenv('USERS', '').split(',')

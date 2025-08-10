@@ -3,6 +3,7 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_smorest import Api
+from flask_migrate import Migrate, upgrade as alembic_upgrade
 
 from resources.Challenge import blp as ChallengeBlueprint
 
@@ -28,6 +29,18 @@ def create_app(settings_module: str | None = None):
 
     app.config['SQLALCHEMY_DATABASE_URI'] = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        "pool_pre_ping": True,
+        "pool_recycle": 1800,
+    }
+
+    DB_SSL:bool = app.config.get("DB_SSL", False)
+    DB_SSL_CA = app.config.get("DB_SSL_CA")
+    if DB_SSL and DB_SSL_CA:
+        app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {})
+        app.config["SQLALCHEMY_ENGINE_OPTIONS"]["connect_args"] = {
+            "ssl": {"ca": DB_SSL_CA}
+        }
         
     CORS(
        app,
@@ -48,10 +61,6 @@ def create_app(settings_module: str | None = None):
     app.config['OPENAPI_SWAGGER_UI_URL'] = 'https://cdn.jsdelivr.net/npm/swagger-ui-dist/'
         
     app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024
-
-    app.config['JWT_TOKEN_LOCATION'] = os.getenv('JWT_TOKEN_LOCATION', 'headers')
-    app.config['JWT_HEADER_NAME'] = os.getenv('JWT_HEADER_NAME', 'Authorization')
-    app.config['JWT_HEADER_TYPE'] = os.getenv('JWT_HEADER_TYPE', 'Bearer')
     
     def getApiPrefix(url:str) -> str: return f"{app.config['API_PREFIX']}/{url}"
 
@@ -66,14 +75,17 @@ def create_app(settings_module: str | None = None):
     api.register_blueprint(ChallengeBlueprint, url_prefix=getApiPrefix('challenge'))
 
     from db import create_db
-    import models
 
     with app.app_context():
         db = create_db(app)
-        db.create_all()
+        import models
+        migrate = Migrate(app, db)
+        DB_AUTO_MIGRATE = app.config.get("DB_AUTO_MIGRATE", True)
+        migrations_dir = os.path.join(os.path.dirname(__file__), "migrations")
+        if DB_AUTO_MIGRATE and os.path.isdir(migrations_dir) and os.path.isfile(os.path.join(migrations_dir, "env.py")):
+            alembic_upgrade()
     
     ## NotImplementedError
-    
     @app.errorhandler(NotImplementedError)
     def handle_not_implemented_error(error):
         response = {
