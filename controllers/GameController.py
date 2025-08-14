@@ -1,36 +1,5 @@
 """
-game_controller.py
-
 This module provides a high-level controller for managing multi-player turn-based games using Redis as the backing store. It encapsulates lobby creation, player management and per-game state without persisting long-term accounts in a relational database. The implementation follows the SOLID principles: it separates concerns between the controller, data models and external dependencies and provides clear extension points for custom challenge selection and game rules.
-
-Usage example::
-
-    import redis
-    from game_controller import GameController, ChallengeProvider, PlayerInfo
-
-    class MyChallengeProvider(ChallengeProvider):
-        def get_next_challenge(self, lobby_code: str, game_state: dict) -> dict:
-            # implement your challenge selection here
-            return {"title": "Example Challenge", "description": "Do something fun"}
-
-    r = redis.Redis(host="redis", port=6379, decode_responses=True)
-    controller = GameController(r, MyChallengeProvider())
-
-    # create a new lobby and add players
-    lobby_code = controller.create_lobby(PlayerInfo(username="alice", drinking=True,
-                                                   smoking=False, partnered=False,
-                                                   virgin=False, profile_pic=None))
-    controller.join_lobby(lobby_code, PlayerInfo(username="bob", drinking=False,
-                                                 smoking=True, partnered=True,
-                                                 virgin=False, profile_pic="bob.jpg"))
-    # start the game and get the first challenge
-    controller.start_game(lobby_code)
-    challenge = controller.next_turn(lobby_code)
-
-The controller is designed to be agnostic about the web framework
-managing WebSocket connections.  A typical integration would have
-event handlers call into `join_lobby`, `leave_lobby`, `next_turn`,
-etc., and relay the resulting state over sockets.
 """
 
 from __future__ import annotations
@@ -336,8 +305,6 @@ class GameController:
         be updated; unspecified fields are left untouched.
         """
         user_key = self.USER_INFO_TEMPLATE.format(username=info.username)
-        # Only update provided fields; use dict comprehension to
-        # exclude None values so as not to overwrite existing ones.
         update_data = {
             "drinking": json.dumps(info.drinking),
             "smoking": json.dumps(info.smoking),
@@ -358,7 +325,6 @@ class GameController:
         idempotent.
         """
         state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=state.username)
-        # Use HSETNX to only set non-existing fields
         mapping = {
             "points": state.points,
             "role": state.role or "",
@@ -366,5 +332,4 @@ class GameController:
             "connected": json.dumps(state.connected),
         }
         for field_name, value in mapping.items():
-            # hsetnx returns True if field was set
             self.redis.hsetnx(state_key, field_name, value)
