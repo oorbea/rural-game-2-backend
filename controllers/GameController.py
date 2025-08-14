@@ -12,7 +12,9 @@ from datetime import datetime, date
 from typing import Any, Iterable
 import redis
 
+from helpers.normalize_value import normalize_value
 from helpers.IChallengeProvider import ChallengeProvider
+from helpers.IPlayerManager import PlayerManager
 from helpers.PlayerInfo import PlayerInfo
 from helpers.PlayerState import PlayerState
 
@@ -28,9 +30,10 @@ class GameController:
     USER_INFO_TEMPLATE = "user:{username}"
     ACTIVE_LOBBIES_SET = "lobbies:active"
 
-    def __init__(self, redis_client: redis.Redis, challenge_provider: ChallengeProvider) -> None:
+    def __init__(self, redis_client: redis.Redis, challenge_provider: ChallengeProvider, player_manager: PlayerManager) -> None:
         self.redis = redis_client
         self.challenge_provider = challenge_provider
+        self.player_manager = player_manager
 
     # ------------------------------------------------------------------
     # Lobby management
@@ -321,6 +324,33 @@ class GameController:
         players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
         player_names = self.redis.lrange(players_list_key, 0, -1)
         return player_names
+    
+    def update_player_info(self, code: str, current_username: str, new_info: dict[str, Any]):
+        """Update a player's static information in the lobby.
+
+        :param code: lobby code
+        :param current_username: the player's current username
+        :param new_info: dictionary containing updated player information
+        """
+        return self.player_manager.update_player_info(code, current_username, new_info)
+    
+    def get_player_info(self, code: str, username: str):
+        """Retrieve a player's static information in the lobby.
+
+        :param code: lobby code
+        :param username: the player's username
+        :returns: a PlayerInfo object containing the player's static information
+        """
+        return self.player_manager.get_player_info(code, username)
+    
+    def get_player_state(self, code: str, username: str):
+        """Retrieve a player's dynamic state in the lobby.
+
+        :param code: lobby code
+        :param username: the player's username
+        :returns: a PlayerState object containing the player's dynamic state
+        """
+        return self.player_manager.get_player_state(code, username)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -374,24 +404,6 @@ class GameController:
             "connected": state.connected,
         }
         self._hset_serialized(state_key, mapping=mapping)
-    
-    def _normalize_value(self, v: Any) -> str | int | float:
-        """Normalize Python values to Redis-compatible types."""
-        if v is None:
-            return ""
-        if isinstance(v, bool):
-            return int(v)
-        if isinstance(v, (int, float, str)):
-            return v
-        if isinstance(v, (datetime, date)):
-            return v.isoformat()
-        try:
-            from enum import Enum
-            if isinstance(v, Enum):
-                return str(v.value)
-        except Exception:
-            pass
-        return json.dumps(v, separators=(",", ":"))
 
     def _hset_serialized(
         self,
@@ -422,13 +434,13 @@ class GameController:
             raise ValueError("Use exactly one of: (mapping) OR (items) OR (key+value)")
 
         if mapping is not None:
-            serial = {k: self._normalize_value(v) for k, v in mapping.items()}
+            serial = {k: normalize_value(v) for k, v in mapping.items()}
             return self.redis.hset(name, mapping=serial)
 
         if items is not None:
-            serial = {k: self._normalize_value(v) for (k, v) in items}
+            serial = {k: normalize_value(v) for (k, v) in items}
             return self.redis.hset(name, mapping=serial)
 
         if key is None:
             raise ValueError("If using key/value, 'key' must be provided")
-        return self.redis.hset(name, key, self._normalize_value(value))
+        return self.redis.hset(name, key, normalize_value(value))

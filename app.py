@@ -87,15 +87,18 @@ def create_app(settings_module: str | None = None):
     socketio.init_app(app, cors_allowed_origins='*')
 
     r = redis.Redis(host="redis", port=6379, decode_responses=True)
-    module_name = app.config.get('CHALLENGE_PROVIDER_MODULE', 'controllers.TurnManager')
+    turn_module_name = app.config.get('CHALLENGE_PROVIDER_MODULE', 'controllers.TurnManager')
+    player_module_name = app.config.get('PLAYER_MANAGER_MODULE', 'controllers.PlayerManager')
     try:
-        turn_module = import_module(module_name)
+        turn_module = import_module(turn_module_name)
+        player_module = import_module(player_module_name)
         turn_manager = turn_module.TurnManager()
-        app.extensions['game_controller'] = GameController(r, turn_manager)
+        player_manager = player_module.PlayerManager(r)
+        app.extensions['game_controller'] = GameController(r, turn_manager, player_manager)
     except ImportError as e:
-        raise ImportError(f"Failed to import module '{module_name}': {e}")
+        raise ImportError(f"Could not import module '{turn_module_name}' or '{player_module_name}': {e}")
     except AttributeError as e:
-        raise AttributeError(f"Module '{module_name}' does not have 'TurnManager' class: {e}")
+        raise AttributeError(f"Module '{turn_module_name}' or '{player_module_name}' does not have the required class: {e}")
     except Exception as e:
         raise Exception(f"An error occurred while initializing the game controller: {e}")
 

@@ -47,6 +47,20 @@ channels:
       summary: Start the game in the specified lobby.
       message:
         $ref: '#/components/messages/StartGame'
+  update_player:
+    description: Client requests to update their player information.
+    publish:
+      operationId: updatePlayer
+      summary: Update player information in the lobby.
+      message:
+        $ref: '#/components/messages/UpdatePlayer'
+  get_user_info:
+    description: Client requests to get their own player information.
+    publish:
+      operationId: getUserInfo
+      summary: Retrieve the player's own information.
+      message:
+        $ref: '#/components/messages/GetUserInfo'
   player_joined:
     description: Notification sent when a player joins a lobby.
     subscribe:
@@ -68,6 +82,13 @@ channels:
       summary: Receive the initial game state after the game has started.
       message:
         $ref: '#/components/messages/GameStarted'
+  player_updated:
+    description: Notification sent when a player updates their information.
+    subscribe:
+      operationId: playerUpdated
+      summary: Receive updated player information after a player update.
+      message:
+        $ref: '#/components/messages/PlayerUpdated'
   error:
     description: Error notifications related to lobby or game operations.
     subscribe:
@@ -136,6 +157,60 @@ components:
           player_name:
             type: string
             description: Host username who is starting the game.
+    UpdatePlayer:
+      name: UpdatePlayer
+      title: Update Player
+      summary: Message sent by the client to update their player information.
+      payload:
+        type: object
+        required:
+          - code
+          - current_username
+        properties:
+          code:
+            type: string
+            description: Lobby code where the player is located.
+          current_username:
+            type: string
+            description: Current username of the player to update.
+          new_username:
+            type: string
+            description: New username for the player (optional).
+          drinking:
+            type: boolean
+            description: Whether the player drinks alcohol (optional).
+          smoking:
+            type: boolean
+            description: Whether the player smokes (optional).
+          partnered:
+            type: boolean
+            description: Whether the player is in a relationship (optional).
+          virgin:
+            type: boolean
+            description: Whether the player is a virgin (optional).
+          gender:
+            $ref: '#/components/schemas/GenderEnum'
+            description: Gender of the player (optional).
+          profile_pic:
+            type: string
+            nullable: true
+            description: Optional URL or identifier for the player's profile picture.
+    GetUserInfo:
+      name: GetUserInfo
+      title: Get User Info
+      summary: Message sent by the client to retrieve their own player information.
+      payload:
+        type: object
+        required:
+          - code
+          - player_name
+        properties:
+          code:
+            type: string
+            description: Lobby code where the player is located.
+          player_name:
+            type: string
+            description: Username of the player requesting their information.
     PlayerJoined:
       name: PlayerJoined
       title: Player Joined
@@ -171,6 +246,22 @@ components:
       summary: Notification that the game has started and includes the full game state.
       payload:
         $ref: '#/components/schemas/GameState'
+    PlayerUpdated:
+      name: PlayerUpdated
+      title: Player Updated
+      summary: Notification that a player has updated their information.
+      payload:
+        type: object
+        required:
+          - old_username
+          - new_username
+        properties:
+          old_username:
+            type: string
+            description: Previous username of the player.
+          new_username:
+            type: string
+            description: New username of the player.
     Error:
       name: Error
       title: Error

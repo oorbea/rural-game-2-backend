@@ -76,3 +76,15 @@ class CodeAndUsernameSchema(Schema):
     """Schema for validating code and username data."""
     player_name = fields.String(required=True)
     code = fields.String(required=True, validate=validate.Length(equal=4))
+
+class UpdatePlayerSchema(Schema):
+    """Schema for validating player updates."""
+    current_username = fields.String(required=True)
+    code = fields.String(required=True, validate=validate.Length(equal=4))
+    new_username = fields.String(required=False)
+    drinking = fields.Boolean(required=False)
+    smoking = fields.Boolean(required=False)
+    partnered = fields.Boolean(required=False)
+    virgin = fields.Boolean(required=False)
+    gender = fields.String(required=False, validate=validate.OneOf([member.value for member in GenderEnum]))
+    profile_pic = fields.String(required=False, allow_none=True, load_default=None)
