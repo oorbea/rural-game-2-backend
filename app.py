@@ -5,12 +5,13 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_smorest import Api
 from flask_migrate import Migrate, upgrade as alembic_upgrade
-from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_socketio import SocketIO
 import redis
 
 from controllers.GameController import GameController
 from db import create_db
 
+from resources.socket_docs import blp as SocketDocsBlueprint
 from resources.Challenge import blp as ChallengeBlueprint
 
 from events.LobbyEvents import LobbyEvents
@@ -99,6 +100,7 @@ def create_app(settings_module: str | None = None):
         raise Exception(f"An error occurred while initializing the game controller: {e}")
 
     # HTTP routes
+    api.register_blueprint(SocketDocsBlueprint, url_prefix=getApiPrefix('docs'))
     api.register_blueprint(ChallengeBlueprint, url_prefix=getApiPrefix('challenge'))
 
     # SocketIO events
@@ -128,4 +130,4 @@ def create_app(settings_module: str | None = None):
 app = create_app(os.getenv('SETTINGS_MODULE', None))
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=app.config.get('PORT', 5000), debug=app.config.get('DEBUG', False), use_reloader=app.config.get('DEBUG', False))
+    socketio.run(app, host="0.0.0.0", port=app.config.get('PORT', 5000), debug=app.config.get('DEBUG', False), use_reloader=app.config.get('DEBUG', False), allow_unsafe_werkzeug=True)

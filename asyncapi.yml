@@ -1,0 +1,240 @@
+asyncapi: '2.2.0'
+info:
+  title: Rural Game 2 Real-Time API
+  version: '{{API_VERSION}}'
+  description: |
+    Real-time API for lobby management and game control in Rural Game 2. This
+    specification describes the Socket.IO events used to manage lobbies,
+    handle player actions and broadcast game state. The events are
+    published and subscribed over a WebSocket endpoint using Socket.IO.
+
+servers:
+  production:
+    url: ws://ruralgame.ddns.net/game/lobby
+    protocol: ws
+    description: Production WebSocket server for the lobby namespace.
+  local:
+    url: ws://localhost:5000/game/lobby
+    protocol: ws
+    description: Local development WebSocket server (Flask-SocketIO)
+
+channels:
+  join_lobby:
+    description: Client requests to join a lobby.
+    publish:
+      operationId: joinLobby
+      summary: Join an existing lobby by code.
+      message:
+        $ref: '#/components/messages/JoinLobby'
+  leave_lobby:
+    description: Client requests to leave a lobby.
+    publish:
+      operationId: leaveLobby
+      summary: Leave the specified lobby.
+      message:
+        $ref: '#/components/messages/LeaveLobby'
+  start_game:
+    description: Client requests to start the game for a lobby.
+    publish:
+      operationId: startGame
+      summary: Start the game in the specified lobby.
+      message:
+        $ref: '#/components/messages/StartGame'
+  player_joined:
+    description: Notification sent when a player joins a lobby.
+    subscribe:
+      operationId: playerJoined
+      summary: Receive information about the player that just joined.
+      message:
+        $ref: '#/components/messages/PlayerJoined'
+  player_left:
+    description: Notification sent when a player leaves a lobby.
+    subscribe:
+      operationId: playerLeft
+      summary: Receive information about the player that just left.
+      message:
+        $ref: '#/components/messages/PlayerLeft'
+  game_started:
+    description: Notification sent when the game starts.
+    subscribe:
+      operationId: gameStarted
+      summary: Receive the initial game state after the game has started.
+      message:
+        $ref: '#/components/messages/GameStarted'
+  error:
+    description: Error notifications related to lobby or game operations.
+    subscribe:
+      operationId: error
+      summary: Receive error messages for failed operations.
+      message:
+        $ref: '#/components/messages/Error'
+
+components:
+  messages:
+    JoinLobby:
+      name: JoinLobby
+      title: Join Lobby
+      summary: Message sent by the client to join a lobby.
+      payload:
+        type: object
+        required:
+          - code
+          - player_info
+        properties:
+          code:
+            type: string
+            description: Unique 4-digit lobby code.
+          player_info:
+            $ref: '#/components/schemas/PlayerInfo'
+    LeaveLobby:
+      name: LeaveLobby
+      title: Leave Lobby
+      summary: Message sent by the client to leave a lobby.
+      payload:
+        type: object
+        required:
+          - code
+          - player
+        properties:
+          code:
+            type: string
+            description: Lobby code to leave.
+          player:
+            type: string
+            description: Username of the player leaving.
+    StartGame:
+      name: StartGame
+      title: Start Game
+      summary: Message sent by the client to initiate the game in a lobby.
+      payload:
+        type: object
+        required:
+          - code
+        properties:
+          code:
+            type: string
+            description: Lobby code where the game should start.
+    PlayerJoined:
+      name: PlayerJoined
+      title: Player Joined
+      summary: Notification that a new player has joined a lobby.
+      payload:
+        type: object
+        required:
+          - player
+        properties:
+          player:
+            type: string
+            description: Username of the player who joined.
+    PlayerLeft:
+      name: PlayerLeft
+      title: Player Left
+      summary: Notification that a player has left a lobby.
+      payload:
+        type: object
+        required:
+          - player
+        properties:
+          player:
+            type: string
+            description: Username of the player who left.
+    GameStarted:
+      name: GameStarted
+      title: Game Started
+      summary: Notification that the game has started and includes the full game state.
+      payload:
+        $ref: '#/components/schemas/GameState'
+    Error:
+      name: Error
+      title: Error
+      summary: Error message emitted by the server when an operation fails.
+      payload:
+        type: object
+        properties:
+          message:
+            type: string
+            description: Human-readable error message.
+
+  schemas:
+    GenderEnum:
+      type: string
+      description: Gender of the player.
+      enum:
+        - male
+        - female
+    PlayerInfo:
+      type: object
+      description: Static information about a player provided when they join a lobby.
+      required:
+        - username
+        - drinking
+        - smoking
+        - partnered
+        - virgin
+        - gender
+      properties:
+        username:
+          type: string
+          description: Unique username of the player.
+        drinking:
+          type: boolean
+          description: Whether the player drinks alcohol.
+        smoking:
+          type: boolean
+          description: Whether the player smokes.
+        partnered:
+          type: boolean
+          description: Whether the player is in a relationship.
+        virgin:
+          type: boolean
+          description: Whether the player is a virgin.
+        gender:
+          $ref: '#/components/schemas/GenderEnum'
+        profile_pic:
+          type: string
+          nullable: true
+          description: Optional URL or identifier for the player's profile picture.
+    PlayerState:
+      type: object
+      description: Dynamic state of a player within a lobby.
+      required:
+        - username
+        - points
+        - secret_missions
+        - connected
+      properties:
+        username:
+          type: string
+          description: Username of the player.
+        points:
+          type: integer
+          description: Current score of the player.
+        role:
+          type: string
+          nullable: true
+          description: Role assigned to the player in the current game.
+        secret_missions:
+          type: array
+          items:
+            type: string
+          description: List of secret missions assigned to the player.
+        connected:
+          type: boolean
+          description: Indicates if the player is currently connected via websocket.
+    GameState:
+      type: object
+      description: Full state of a lobby including lobby metadata, players and turn order.
+      properties:
+        lobby:
+          type: object
+          description: Metadata about the lobby (e.g., creation time, current turn).
+        players:
+          type: object
+          description: Mapping of usernames to their dynamic state.
+          additionalProperties:
+            $ref: '#/components/schemas/PlayerState'
+        order:
+          type: array
+          items:
+            type: string
+          description: Ordered list of usernames representing turn rotation.
