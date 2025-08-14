@@ -1,5 +1,5 @@
 from marshmallow import INCLUDE, RAISE, Schema, ValidationError, fields, validate, validates, validates_schema
-
+from enums.GenderEnum import GenderEnum
 class ChallengeSchema(Schema):
     """Schema for validating challenge data."""
     title = fields.String(required=True, validate=validate.Length(min=1, max=100))
@@ -56,3 +56,13 @@ class RoleSchema(Schema):
     title = fields.String(required=True, validate=validate.Length(min=1, max=100))
     description = fields.String(required=True, validate=validate.Length(min=1, max=500))
     quantity_per_game = fields.Integer(required=False, allow_none=True, load_default=None)
+
+class PlayerInfoSchema(Schema):
+    """Schema for validating player info."""
+    username = fields.String(required=True)
+    drinking = fields.Boolean(required=True)
+    smoking = fields.Boolean(required=True)
+    partnered = fields.Boolean(required=True)
+    virgin = fields.Boolean(required=True)
+    gender = fields.String(required=True, validate=validate.OneOf(GenderEnum._member_names_))
+    profile_pic = fields.String(required=False, allow_none=True, load_default=None)

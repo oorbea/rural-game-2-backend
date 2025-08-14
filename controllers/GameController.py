@@ -116,10 +116,11 @@ class GameController:
     # ------------------------------------------------------------------
     # Game state management
     # ------------------------------------------------------------------
-    def start_game(self, code: str) -> None:
+    def start_game(self, code: str, player: str) -> None:
         """Mark a lobby as started.
 
         :param code: lobby code
+        :param player: player who initiated the game start
         """
         lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
         if not self.redis.exists(lobby_key):
@@ -128,6 +129,9 @@ class GameController:
         existing_players:list[str] = self.redis.lrange(players_list_key, 0, -1)
         if not existing_players:
             raise ValueError(f"Cannot start game; lobby {code} has no players")
+        host = self.redis.hget(lobby_key, "host")
+        if host != player:
+            raise ValueError(f"Only the host ({host}) can start the game")
         roles = self.challenge_provider.get_player_roles(code, existing_players)
         for player in existing_players:
             self.assign_role(code, player, roles.get(player, "default"))

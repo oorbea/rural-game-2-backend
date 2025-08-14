@@ -79,12 +79,12 @@ components:
         type: object
         required:
           - code
-          - player_info
+          - player
         properties:
           code:
             type: string
             description: Unique 4-digit lobby code.
-          player_info:
+          player:
             $ref: '#/components/schemas/PlayerInfo'
     LeaveLobby:
       name: LeaveLobby
@@ -94,12 +94,12 @@ components:
         type: object
         required:
           - code
-          - player
+          - player_name
         properties:
           code:
             type: string
             description: Lobby code to leave.
-          player:
+          player_name:
             type: string
             description: Username of the player leaving.
     StartGame:
@@ -110,10 +110,14 @@ components:
         type: object
         required:
           - code
+          - player_name
         properties:
           code:
             type: string
             description: Lobby code where the game should start.
+          player_name:
+            type: string
+            description: Host username who is starting the game.
     PlayerJoined:
       name: PlayerJoined
       title: Player Joined
