@@ -7,6 +7,24 @@ from schemas import PlayerInfoSchema
 
 class LobbyEvents(Namespace):
     """Namespace for handling lobby-related events."""
+    def on_create_lobby(self, data):
+        player = data['player']
+        schema = PlayerInfoSchema()
+        try:
+            player:dict = schema.load(player)
+        except ValidationError as e:
+            return {'ok': False, 'error': str(e)}
+        gc:GameController = current_app.extensions['game_controller']
+        try:
+            code = gc.create_lobby(PlayerInfo(**player))
+            join_room(code)
+            return {'ok': True, 'code': code, 'connected_players': gc.get_connected_players(code)}
+        except ValueError as e:
+            return {'ok': False, 'error': str(e)}
+        except Exception as e:
+            return {'ok': False, 'error': f'An error occurred while creating the lobby.\n{str(e)}'}
+
+
     def on_join_lobby(self, data):
         code = str(data['code'])
         if len(code) != 4:

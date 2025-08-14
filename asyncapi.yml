@@ -19,6 +19,13 @@ servers:
     description: Local development WebSocket server (Flask-SocketIO)
 
 channels:
+  create_lobby:
+    description: Client requests to create a new lobby.
+    publish:
+      operationId: createLobby
+      summary: Create a new lobby with the provided player information.
+      message:
+        $ref: '#/components/messages/JoinLobby'
   join_lobby:
     description: Client requests to join a lobby.
     publish:
@@ -71,6 +78,17 @@ channels:
 
 components:
   messages:
+    Create_lobby:
+      name: CreateLobby
+      title: Create Lobby
+      summary: Message sent by the client to create a new lobby.
+      payload:
+        type: object
+        required:
+          - player
+        properties:
+          player:
+            $ref: '#/components/schemas/PlayerInfo'
     JoinLobby:
       name: JoinLobby
       title: Join Lobby
