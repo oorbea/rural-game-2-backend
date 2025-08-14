@@ -79,22 +79,63 @@ class GameController:
         self._persist_player_state(code, PlayerState(username=player.username))
         self.redis.rpush(players_list_key, player.username)
 
-    def leave_lobby(self, code: str, username: str) -> None:
-        """Remove a player from a lobby.
+    def leave_lobby(self, code: str, username: str) -> str | None:
+        """Remove a player from a lobby, reassign host if needed, and
+        atomically delete the lobby if it becomes empty.
 
-        This will remove the player's entry from the players list and delete their dynamic lobby state. If the last player leaves, the lobby is closed and cleaned up. A player can also be marked as disconnected rather than removed if you wish to allow reconnects; see :meth:`set_player_connected`.
-
-        :param code: lobby code
-        :param username: player to remove
+        :returns: the username of the current host after the removal,
+                or None if the lobby was deleted (became empty).
         """
         if not self.redis.sismember(self.ACTIVE_LOBBIES_SET, code):
             raise ValueError(f"Lobby {code} does not exist or is not active")
+
+        lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
         players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
-        self.redis.lrem(players_list_key, 0, username)
         state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=username)
-        self.redis.delete(state_key)
-        if self.redis.llen(players_list_key) == 0:
-            self.end_lobby(code)
+
+        with self.redis.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(players_list_key, lobby_key)
+
+                    players: list[str] = pipe.lrange(players_list_key, 0, -1)
+                    host_raw = pipe.hget(lobby_key, "host")
+                    host_val = host_raw.decode() if isinstance(host_raw, (bytes, bytearray)) else host_raw
+
+                    if username not in players:
+                        pipe.unwatch()
+                        return host_val
+
+                    remaining = [p for p in players if p != username]
+                    new_len = len(remaining)
+                    next_host = remaining[0] if new_len > 0 else None
+
+                    if new_len == 0:
+                        result_host = None
+                    else:
+                        if not host_val or host_val == username:
+                            result_host = next_host
+                        else:
+                            result_host = host_val
+
+                    pipe.multi()
+                    pipe.lrem(players_list_key, 0, username)
+                    pipe.delete(state_key)
+
+                    if new_len == 0:
+                        pipe.delete(players_list_key)
+                        pipe.delete(lobby_key)
+                        pipe.srem(self.ACTIVE_LOBBIES_SET, code)
+                    else:
+                        if (not host_val) or (host_val == username):
+                            pipe.hset(lobby_key, "host", result_host)
+
+                    pipe.execute()
+                    return result_host
+                except redis.WatchError:
+                    continue
+
+
 
     def end_lobby(self, code: str) -> None:
         """Clean up all data associated with a lobby.
@@ -214,10 +255,7 @@ class GameController:
     def set_player_connected(self, code: str, username: str, connected: bool) -> None:
         """Mark a player's connection status without removing them from the lobby.
 
-        This is useful for handling transient disconnects.  When a
-        player disconnects, set `connected=False`; upon reconnection,
-        set `connected=True`.  A disconnected player remains in
-        the turn rotation until explicitly removed.
+        This is useful for handling transient disconnects. When a player disconnects, set `connected=False`; upon reconnection, set `connected=True`.  A disconnected player remains in the turn rotation until explicitly removed.
         """
         state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=username)
         if not self.redis.exists(state_key):
@@ -227,10 +265,7 @@ class GameController:
     def get_lobby_state(self, code: str) -> dict[str, Any]:
         """Retrieve the full state of a lobby.
 
-        This returns a dictionary containing lobby metadata, the ordered
-        list of players and each player's dynamic state.  It can be
-        used by the caller to transmit state to clients or to
-        compute game logic.
+        This returns a dictionary containing lobby metadata, the ordered list of players and each player's dynamic state. It can be used by the caller to transmit state to clients or to compute game logic.
 
         :param code: lobby code
         :returns: mapping of lobby state and per-player states

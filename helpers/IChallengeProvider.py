@@ -13,6 +13,7 @@ class ChallengeProvider(ABC):
             players, turn index, roles and any custom flags
         :returns: a serialisable dictionary representing the challenge
         """
+        raise NotImplementedError("This method should be implemented by subclasses")
 
     @abstractmethod
     def get_player_roles(self, lobby_code: str, players: list[str]) -> dict[str, str]:
@@ -23,3 +24,4 @@ class ChallengeProvider(ABC):
         :param players: list of player usernames in the lobby
         :returns: a dictionary mapping usernames to their assigned roles
         """
+        raise NotImplementedError("This method should be implemented by subclasses")

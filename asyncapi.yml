@@ -156,10 +156,15 @@ components:
         type: object
         required:
           - player
+          - host
         properties:
           player:
             type: string
             description: Username of the player who left.
+          host:
+            type: string
+            nullable: true
+            description: Username of the current host after the player left or null if the lobby has been removed.
     GameStarted:
       name: GameStarted
       title: Game Started
