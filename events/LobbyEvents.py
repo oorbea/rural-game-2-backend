@@ -3,7 +3,7 @@ from flask_socketio import Namespace, join_room, leave_room
 from marshmallow import ValidationError
 from controllers.GameController import GameController
 from helpers.PlayerInfo import PlayerInfo
-from schemas import PlayerInfoSchema
+from schemas import PlayerInfoSchema, CodeAndUsernameSchema, CodeAndPlayerSchema
 
 class LobbyEvents(Namespace):
     """Namespace for handling lobby-related events."""
@@ -32,17 +32,12 @@ class LobbyEvents(Namespace):
     def on_join_lobby(self, data):
         try:
             code = str(data['code'])
-        except KeyError:
-            return {'ok': False, 'error': 'Lobby code is required to join a lobby.'}
-        if len(code) != 4:
-            return {'ok': False, 'error': 'Lobby code must be exactly 4 characters long.'}
-        try:
             info = data['player']
         except KeyError:
-            return {'ok': False, 'error': 'Player information is required to join a lobby.'}
-        schema = PlayerInfoSchema()
+            return {'ok': False, 'error': 'Lobby code and Player Information are required to join a lobby.'}
+        schema = CodeAndPlayerSchema()
         try:
-            info:dict = schema.load(info)
+            data = schema.load(data)
         except ValidationError as e:
             return {'ok': False, 'error': str(e)}
         gc:GameController = current_app.extensions['game_controller']
@@ -60,14 +55,15 @@ class LobbyEvents(Namespace):
     def on_leave_lobby(self, data):
         try:
             code = str(data['code'])
-        except KeyError:
-            return {'ok': False, 'error': 'Lobby code is required to leave a lobby.'}
-        if len(code) != 4:
-            return {'ok': False, 'error': 'Lobby code must be exactly 4 characters long.'}
-        try:
             player = data['player_name']
         except KeyError:
-            return {'ok': False, 'error': 'Player name is required to leave a lobby.'}
+            return {'ok': False, 'error': 'Lobby code and Player name are required to leave a lobby.'}
+    
+        schema = CodeAndUsernameSchema()
+        try:
+            data = schema.load(data)
+        except ValidationError as e:
+            return {'ok': False, 'error': str(e)}
         gc:GameController = current_app.extensions['game_controller']
         try:
             new_host = gc.leave_lobby(code, player)
@@ -84,14 +80,14 @@ class LobbyEvents(Namespace):
     def on_start_game(self, data):
         try:
             code = str(data['code'])
-        except KeyError:
-            return {'ok': False, 'error': 'Lobby code is required to start a game.'}
-        if len(code) != 4:
-            return {'ok': False, 'error': 'Lobby code must be exactly 4 characters long.'}
-        try:
             player = data['player_name']
         except KeyError:
-            return {'ok': False, 'error': 'Player name is required to start a game.'}
+            return {'ok': False, 'error': 'Lobby code and Player name are required to start a game.'}
+        schema = CodeAndUsernameSchema()
+        try:
+            data = schema.load(data)
+        except ValidationError as e:
+            return {'ok': False, 'error': str(e)}
         gc:GameController = current_app.extensions['game_controller']
         try:
             gc.start_game(code, player)

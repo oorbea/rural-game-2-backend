@@ -66,3 +66,13 @@ class PlayerInfoSchema(Schema):
     virgin = fields.Boolean(required=True)
     gender = fields.String(required=True, validate=validate.OneOf([member.value for member in GenderEnum]))
     profile_pic = fields.String(required=False, allow_none=True, load_default=None)
+
+class CodeAndPlayerSchema(Schema):
+    """Schema for validating code and player data."""
+    code = fields.String(required=True, validate=validate.Length(equal=4))
+    player = fields.Nested(PlayerInfoSchema, required=True)
+
+class CodeAndUsernameSchema(Schema):
+    """Schema for validating code and username data."""
+    player_name = fields.String(required=True)
+    code = fields.String(required=True, validate=validate.Length(equal=4))
