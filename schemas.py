@@ -64,5 +64,5 @@ class PlayerInfoSchema(Schema):
     smoking = fields.Boolean(required=True)
     partnered = fields.Boolean(required=True)
     virgin = fields.Boolean(required=True)
-    gender = fields.String(required=True, validate=validate.OneOf(GenderEnum._member_names_))
+    gender = fields.String(required=True, validate=validate.OneOf([member.value for member in GenderEnum]))
     profile_pic = fields.String(required=False, allow_none=True, load_default=None)

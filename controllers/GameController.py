@@ -8,8 +8,8 @@ import json
 import random
 import string
 
-from datetime import datetime
-from typing import Any
+from datetime import datetime, date
+from typing import Any, Iterable
 import redis
 
 from helpers.IChallengeProvider import ChallengeProvider
@@ -53,7 +53,7 @@ class GameController:
             "active": True,
             "host": host.username,
         }
-        self.redis.hmset(lobby_key, lobby_meta)
+        self._hset_serialized(lobby_key, mapping=lobby_meta)
         self.redis.sadd(self.ACTIVE_LOBBIES_SET, code)
 
         self.redis.rpush(players_list_key, host.username)
@@ -222,7 +222,7 @@ class GameController:
         state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=username)
         if not self.redis.exists(state_key):
             raise ValueError(f"No state for player {username} in lobby {code}")
-        self.redis.hset(state_key, "connected", json.dumps(connected))
+        self._hset_serialized(state_key, key="connected", value=connected)
 
     def get_lobby_state(self, code: str) -> dict[str, Any]:
         """Retrieve the full state of a lobby.
@@ -316,30 +316,84 @@ class GameController:
         """
         user_key = self.USER_INFO_TEMPLATE.format(username=info.username)
         update_data = {
-            "drinking": json.dumps(info.drinking),
-            "smoking": json.dumps(info.smoking),
-            "partnered": json.dumps(info.partnered),
-            "virgin": json.dumps(info.virgin),
-            "gender": json.dumps(info.gender.value)
+            "drinking": info.drinking,
+            "smoking": info.smoking,
+            "partnered": info.partnered,
+            "virgin": info.virgin,
+            "gender": info.gender
         }
         if info.profile_pic is not None:
             update_data["profile_pic"] = info.profile_pic
-        self.redis.hmset(user_key, update_data)
+        self._hset_serialized(user_key, mapping=update_data)
 
     def _persist_player_state(self, code: str, state: PlayerState) -> None:
         """Persist the dynamic state of a player within a lobby.
 
-        Initial dynamic fields are stored for each new player.  This
-        method will not overwrite existing state (except where
-        explicitly set), so repeated calls for the same player are
-        idempotent.
+        Initial dynamic fields are stored for each new player. This method will not overwrite existing state (except where explicitly set), so repeated calls for the same player are idempotent.
         """
         state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=state.username)
         mapping = {
             "points": state.points,
-            "role": state.role or "",
-            "secret_missions": json.dumps(state.secret_missions),
-            "connected": json.dumps(state.connected),
+            "role": state.role,
+            "secret_missions": state.secret_missions,
+            "connected": state.connected,
         }
-        for field_name, value in mapping.items():
-            self.redis.hsetnx(state_key, field_name, value)
+        self._hset_serialized(state_key, mapping=mapping)
+    
+    def _normalize_value(self, v: Any) -> str | int | float:
+        """Normalize Python values to Redis-compatible types."""
+        if v is None:
+            return ""
+        if isinstance(v, bool):
+            return int(v)
+        if isinstance(v, (int, float, str)):
+            return v
+        if isinstance(v, (datetime, date)):
+            return v.isoformat()
+        try:
+            from enum import Enum
+            if isinstance(v, Enum):
+                return str(v.value)
+        except Exception:
+            pass
+        return json.dumps(v, separators=(",", ":"))
+
+    def _hset_serialized(
+        self,
+        name: str,
+        *,
+        mapping: dict | None = None,
+        items: Iterable[tuple[str, Any]] | None = None,
+        key: str | None = None,
+        value: Any | None = None,
+    ) -> int:
+        """
+        Safe HSET wrapper: serializes values to Redis-friendly types and
+        enforces the correct usage of redis.hset (either key/value OR mapping/items).
+
+        :param name: Redis key to set
+        :param mapping: dictionary to set in Redis
+        :param items: iterable of (key, value) pairs to set in Redis
+        :param key: key to set in Redis (if using key/value)
+        :param value: value to set in Redis (if using key/value)
+        :returns: number of fields added to the hash
+        """
+        modes = sum([
+            mapping is not None,
+            items is not None,
+            key is not None,
+        ])
+        if modes != 1:
+            raise ValueError("Use exactly one of: (mapping) OR (items) OR (key+value)")
+
+        if mapping is not None:
+            serial = {k: self._normalize_value(v) for k, v in mapping.items()}
+            return self.redis.hset(name, mapping=serial)
+
+        if items is not None:
+            serial = {k: self._normalize_value(v) for (k, v) in items}
+            return self.redis.hset(name, mapping=serial)
+
+        if key is None:
+            raise ValueError("If using key/value, 'key' must be provided")
+        return self.redis.hset(name, key, self._normalize_value(value))
