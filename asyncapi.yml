@@ -10,11 +10,11 @@ info:
 
 servers:
   production:
-    url: ws://ruralgame.ddns.net/game/lobby
+    url: ws://ruralgame.ddns.net{PREFIX}/lobby
     protocol: ws
     description: Production WebSocket server for the lobby namespace.
   local:
-    url: ws://localhost:5000/game/lobby
+    url: ws://localhost:5000{PREFIX}/lobby
     protocol: ws
     description: Local development WebSocket server (Flask-SocketIO)
 
@@ -25,7 +25,7 @@ channels:
       operationId: createLobby
       summary: Create a new lobby with the provided player information.
       message:
-        $ref: '#/components/messages/JoinLobby'
+        $ref: '#/components/messages/CreateLobby'
   join_lobby:
     description: Client requests to join a lobby.
     publish:
@@ -78,7 +78,7 @@ channels:
 
 components:
   messages:
-    Create_lobby:
+    CreateLobby:
       name: CreateLobby
       title: Create Lobby
       summary: Message sent by the client to create a new lobby.

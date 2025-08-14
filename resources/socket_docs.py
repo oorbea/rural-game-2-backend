@@ -9,6 +9,7 @@ def asyncapi_yaml():
     ASYNCAPI_PATH = os.path.join(os.path.dirname(__file__), "..", "asyncapi.yml")
     y = open(ASYNCAPI_PATH, "r", encoding="utf-8").read()
     y = y.replace("{{API_VERSION}}", current_app.config.get("API_VERSION", "1.0.0"))
+    y = y.format(PREFIX=current_app.config.get("SOCKETIO_PREFIX"))
     resp = Response(y, mimetype="text/yaml")
     resp.headers['Cache-Control'] = 'no-store'
     return resp
