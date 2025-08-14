@@ -10,6 +10,7 @@ DEFAULT_API_TITLE = 'Rural Game 2 API'
 DEFAULT_SWAGGER_URL = '/api-docs'
 DEFAULT_DEBUG = False
 DEFAULT_PORT = 5000
+DEFAULT_CHALLENGE_PROVIDER_MODULE = 'controllers.TurnManager'
 
 #------------------------------
 
@@ -43,6 +44,7 @@ HOST_NAME = os.getenv('HOST_NAME', f'http://localhost:{PORT}')
 
 ALLOWED_PICTURE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 PROFILE_PICTURES_DIR = "public/ChallengePics"
+CHALLENGE_PROVIDER_MODULE = os.getenv('CHALLENGE_PROVIDER_MODULE', DEFAULT_CHALLENGE_PROVIDER_MODULE)
 
 JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')
 JWT_TOKEN_LOCATION = os.getenv('JWT_TOKEN_LOCATION', 'headers')

@@ -4,7 +4,10 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_smorest import Api
 from flask_migrate import Migrate, upgrade as alembic_upgrade
+import redis
 
+from controllers.GameController import GameController
+from db import create_db
 from resources.Challenge import blp as ChallengeBlueprint
 
 def create_app(settings_module: str | None = None):
@@ -74,7 +77,10 @@ def create_app(settings_module: str | None = None):
 
     api.register_blueprint(ChallengeBlueprint, url_prefix=getApiPrefix('challenge'))
 
-    from db import create_db
+    r = redis.Redis(host="redis", port=6379, decode_responses=True)
+    challenge_module = __import__(app.config.get('CHALLENGE_PROVIDER_MODULE', 'controllers.TurnManager'), fromlist=['TurnManager'])
+    global game_controller
+    game_controller = GameController(r, challenge_module.TurnManager())
 
     with app.app_context():
         db = create_db(app)

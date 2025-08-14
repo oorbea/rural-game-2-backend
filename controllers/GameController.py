@@ -1,0 +1,370 @@
+"""
+game_controller.py
+
+This module provides a high-level controller for managing multi-player turn-based games using Redis as the backing store. It encapsulates lobby creation, player management and per-game state without persisting long-term accounts in a relational database. The implementation follows the SOLID principles: it separates concerns between the controller, data models and external dependencies and provides clear extension points for custom challenge selection and game rules.
+
+Usage example::
+
+    import redis
+    from game_controller import GameController, ChallengeProvider, PlayerInfo
+
+    class MyChallengeProvider(ChallengeProvider):
+        def get_next_challenge(self, lobby_code: str, game_state: dict) -> dict:
+            # implement your challenge selection here
+            return {"title": "Example Challenge", "description": "Do something fun"}
+
+    r = redis.Redis(host="redis", port=6379, decode_responses=True)
+    controller = GameController(r, MyChallengeProvider())
+
+    # create a new lobby and add players
+    lobby_code = controller.create_lobby(PlayerInfo(username="alice", drinking=True,
+                                                   smoking=False, partnered=False,
+                                                   virgin=False, profile_pic=None))
+    controller.join_lobby(lobby_code, PlayerInfo(username="bob", drinking=False,
+                                                 smoking=True, partnered=True,
+                                                 virgin=False, profile_pic="bob.jpg"))
+    # start the game and get the first challenge
+    controller.start_game(lobby_code)
+    challenge = controller.next_turn(lobby_code)
+
+The controller is designed to be agnostic about the web framework
+managing WebSocket connections.  A typical integration would have
+event handlers call into `join_lobby`, `leave_lobby`, `next_turn`,
+etc., and relay the resulting state over sockets.
+"""
+
+from __future__ import annotations
+
+import json
+import random
+import string
+
+from datetime import datetime
+from typing import Any
+import redis
+
+from helpers.IChallengeProvider import ChallengeProvider
+from helpers.PlayerInfo import PlayerInfo
+from helpers.PlayerState import PlayerState
+
+class GameController:
+    """Controller responsible for managing game lobbies and state.
+
+    The controller provides high-level methods to create lobbies, join players, start games, progress turns and track scores, storing all state in Redis. It does not directly interact with WebSocket connections; instead, it returns serialisable data structures which the calling layer can emit to clients.
+    """
+
+    LOBBY_KEY_TEMPLATE = "lobby:{code}"
+    PLAYERS_LIST_TEMPLATE = "lobby:{code}:players"
+    PLAYER_STATE_TEMPLATE = "lobby:{code}:player:{username}"
+    USER_INFO_TEMPLATE = "user:{username}"
+    ACTIVE_LOBBIES_SET = "lobbies:active"
+
+    def __init__(self, redis_client: redis.Redis, challenge_provider: ChallengeProvider) -> None:
+        self.redis = redis_client
+        self.challenge_provider = challenge_provider
+
+    # ------------------------------------------------------------------
+    # Lobby management
+    # ------------------------------------------------------------------
+    def create_lobby(self, host: PlayerInfo) -> str:
+        """Create a new lobby and register the host as the first player.
+
+        A unique 4-digit lobby code is generated and stored in a Redis set so that codes are not reused while active. The host's static information is stored under their user key and their initial game state is stored under the lobby.
+
+        :param host: information about the player creating the lobby
+        :returns: the 4-digit lobby code
+        """
+        code = self._generate_unique_code()
+        lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+
+        lobby_meta = {
+            "created_at": datetime.now().astimezone().isoformat(),
+            "current_turn": 0,
+            "active": True,
+            "host": host.username,
+        }
+        self.redis.hmset(lobby_key, lobby_meta)
+        self.redis.sadd(self.ACTIVE_LOBBIES_SET, code)
+
+        self.redis.rpush(players_list_key, host.username)
+        self._persist_user_info(host)
+        self._persist_player_state(code, PlayerState(username=host.username))
+        return code
+
+    def join_lobby(self, code: str, player: PlayerInfo) -> None:
+        """Join an existing lobby.
+
+        If the lobby is active, the player is appended to the ordered list of participants. Their static information is stored (or updated) under their user key and their dynamic lobby state is initialised. Attempting to join a non-existent or inactive lobby will raise a ValueError.
+
+        :param code: lobby code
+        :param player: static player information
+        """
+        if not self.redis.sismember(self.ACTIVE_LOBBIES_SET, code):
+            raise ValueError(f"Lobby {code} does not exist or is not active")
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+        existing_players:list[str] = self.redis.lrange(players_list_key, 0, -1)
+        if player.username in existing_players:
+            raise ValueError(f"Player '{player.username}' already in lobby")
+        self._persist_user_info(player)
+        self._persist_player_state(code, PlayerState(username=player.username))
+        self.redis.rpush(players_list_key, player.username)
+
+    def leave_lobby(self, code: str, username: str) -> None:
+        """Remove a player from a lobby.
+
+        This will remove the player's entry from the players list and delete their dynamic lobby state. If the last player leaves, the lobby is closed and cleaned up. A player can also be marked as disconnected rather than removed if you wish to allow reconnects; see :meth:`set_player_connected`.
+
+        :param code: lobby code
+        :param username: player to remove
+        """
+        if not self.redis.sismember(self.ACTIVE_LOBBIES_SET, code):
+            raise ValueError(f"Lobby {code} does not exist or is not active")
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+        self.redis.lrem(players_list_key, 0, username)
+        state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=username)
+        self.redis.delete(state_key)
+        if self.redis.llen(players_list_key) == 0:
+            self.end_lobby(code)
+
+    def end_lobby(self, code: str) -> None:
+        """Clean up all data associated with a lobby.
+
+        The lobby metadata, players list and per-player states are removed. The lobby code is released so that it may be reused for future games.
+
+        :param code: lobby code to remove
+        """
+        self.redis.srem(self.ACTIVE_LOBBIES_SET, code)
+        lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+        player_names = self.redis.lrange(players_list_key, 0, -1)
+        self.redis.delete(lobby_key)
+        for name in player_names:
+            state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=name)
+            self.redis.delete(state_key)
+        self.redis.delete(players_list_key)
+
+    # ------------------------------------------------------------------
+    # Game state management
+    # ------------------------------------------------------------------
+    def start_game(self, code: str) -> None:
+        """Mark a lobby as started.
+
+        :param code: lobby code
+        """
+        lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
+        if not self.redis.exists(lobby_key):
+            raise ValueError(f"Lobby {code} does not exist")
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+        existing_players:list[str] = self.redis.lrange(players_list_key, 0, -1)
+        if not existing_players:
+            raise ValueError(f"Cannot start game; lobby {code} has no players")
+        roles = self.challenge_provider.get_player_roles(code, existing_players)
+        for player in existing_players:
+            self.assign_role(code, player, roles.get(player, "default"))
+            self.set_player_connected(code, player, True)
+        self.redis.hset(lobby_key, "current_turn", 0)
+        self.redis.hset(lobby_key, "started_at", datetime.now().astimezone().isoformat())
+
+    def next_turn(self, code: str) -> dict[str, Any]:
+        """Advance to the next player's turn and return the next challenge.
+
+        The current_turn counter is incremented modulo the number of
+        players.  The challenge provider is called with the latest
+        game state to determine the next action or challenge.  If
+        there are no players in the lobby, a ValueError is raised.
+
+        :param code: lobby code
+        :returns: a challenge dictionary as provided by the
+            challenge provider
+        """
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+        lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
+        player_count:int = self.redis.llen(players_list_key)
+        if player_count == 0:
+            raise ValueError(f"Cannot progress turn; lobby {code} has no players")
+
+        with self.redis.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(lobby_key)
+                    current_turn = int(pipe.hget(lobby_key, "current_turn") or 0)
+                    next_turn_index = (current_turn + 1) % player_count
+                    pipe.multi()
+                    pipe.hset(lobby_key, "current_turn", next_turn_index)
+                    pipe.execute()
+                    break
+                except redis.WatchError:
+                    continue
+        game_state = self.get_lobby_state(code)
+        challenge = self.challenge_provider.get_next_challenge(code, game_state)
+        return challenge
+
+    def update_score(self, code: str, username: str, delta: int) -> None:
+        """Adjust a player's score by a delta.
+
+        :param code: lobby code
+        :param username: player whose score to update
+        :param delta: signed integer to add to the player's points
+        """
+        state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=username)
+        if not self.redis.exists(state_key):
+            raise ValueError(f"No state for player {username} in lobby {code}")
+        self.redis.hincrby(state_key, "points", delta)
+
+    def assign_role(self, code: str, username: str, role: str) -> None:
+        """Assign a role to a player.
+
+        Roles might influence challenge assignments or scoring.  The
+        role is stored in the player's dynamic state.  Calling this
+        method will overwrite any previous role.
+        """
+        state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=username)
+        if not self.redis.exists(state_key):
+            raise ValueError(f"No state for player {username} in lobby {code}")
+        self.redis.hset(state_key, "role", role)
+
+    def assign_secret_mission(self, code: str, username: str, mission: str) -> None:
+        """Append a secret mission to a player's state.
+
+        Secret missions are stored as a JSON encoded list in the
+        player's dynamic state.  Existing missions are preserved.
+        """
+        state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=username)
+        if not self.redis.exists(state_key):
+            raise ValueError(f"No state for player {username} in lobby {code}")
+        missions_json = self.redis.hget(state_key, "secret_missions")
+        missions = json.loads(missions_json) if missions_json else []
+        missions.append(mission)
+        self.redis.hset(state_key, "secret_missions", json.dumps(missions))
+
+    def set_player_connected(self, code: str, username: str, connected: bool) -> None:
+        """Mark a player's connection status without removing them from the lobby.
+
+        This is useful for handling transient disconnects.  When a
+        player disconnects, set `connected=False`; upon reconnection,
+        set `connected=True`.  A disconnected player remains in
+        the turn rotation until explicitly removed.
+        """
+        state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=username)
+        if not self.redis.exists(state_key):
+            raise ValueError(f"No state for player {username} in lobby {code}")
+        self.redis.hset(state_key, "connected", json.dumps(connected))
+
+    def get_lobby_state(self, code: str) -> dict[str, Any]:
+        """Retrieve the full state of a lobby.
+
+        This returns a dictionary containing lobby metadata, the ordered
+        list of players and each player's dynamic state.  It can be
+        used by the caller to transmit state to clients or to
+        compute game logic.
+
+        :param code: lobby code
+        :returns: mapping of lobby state and per-player states
+        """
+        lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+        if not self.redis.exists(lobby_key):
+            raise ValueError(f"Lobby {code} does not exist")
+        lobby_meta:dict = self.redis.hgetall(lobby_key)
+        # Parse integers where appropriate
+        if "current_turn" in lobby_meta:
+            try:
+                lobby_meta["current_turn"] = int(lobby_meta["current_turn"])
+            except (TypeError, ValueError):
+                pass
+        player_names = self.redis.lrange(players_list_key, 0, -1)
+        players_state: dict[str, Any] = {}
+        for name in player_names:
+            state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=name)
+            raw_state = self.redis.hgetall(state_key)
+            # Convert JSON encoded fields
+            # points stored as string by Redis; convert to int
+            points_str = raw_state.get("points", "0")
+            try:
+                points = int(points_str)
+            except (TypeError, ValueError):
+                points = 0
+            role = raw_state.get("role") or None
+            missions_json = raw_state.get("secret_missions")
+            secret_missions = json.loads(missions_json) if missions_json else []
+            connected_str = raw_state.get("connected")
+            if connected_str is None:
+                connected = True
+            else:
+                try:
+                    connected = json.loads(connected_str)
+                except json.JSONDecodeError:
+                    connected = bool(connected_str)
+            players_state[name] = {
+                "points": points,
+                "role": role,
+                "secret_missions": secret_missions,
+                "connected": connected,
+            }
+        return {
+            "lobby": lobby_meta,
+            "players": players_state,
+            "order": player_names,
+        }
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+    def _generate_unique_code(self) -> str:
+        """Generate a unique 4-digit lobby code.
+
+        Codes are numeric strings to facilitate easy entry for
+        players.  Collisions are avoided by checking the Redis set
+        of active lobbies.  In the unlikely event that all 9000
+        possible codes are exhausted, a RuntimeError will be raised.
+        """
+        attempts = 0
+        while attempts < 10_000:
+            code = "".join(random.choices(string.digits, k=4))
+            if not self.redis.sismember(self.ACTIVE_LOBBIES_SET, code):
+                return code
+            attempts += 1
+        raise RuntimeError("Unable to generate unique lobby code; too many active lobbies")
+
+    def _persist_user_info(self, info: PlayerInfo) -> None:
+        """Persist static user information under a Redis key.
+
+        This method stores per-user attributes independently from
+        lobby state so that reconnections or participation in
+        multiple games reuse the same data.  Existing fields will
+        be updated; unspecified fields are left untouched.
+        """
+        user_key = self.USER_INFO_TEMPLATE.format(username=info.username)
+        # Only update provided fields; use dict comprehension to
+        # exclude None values so as not to overwrite existing ones.
+        update_data = {
+            "drinking": json.dumps(info.drinking),
+            "smoking": json.dumps(info.smoking),
+            "partnered": json.dumps(info.partnered),
+            "virgin": json.dumps(info.virgin),
+            "gender": json.dumps(info.gender.value)
+        }
+        if info.profile_pic is not None:
+            update_data["profile_pic"] = info.profile_pic
+        self.redis.hmset(user_key, update_data)
+
+    def _persist_player_state(self, code: str, state: PlayerState) -> None:
+        """Persist the dynamic state of a player within a lobby.
+
+        Initial dynamic fields are stored for each new player.  This
+        method will not overwrite existing state (except where
+        explicitly set), so repeated calls for the same player are
+        idempotent.
+        """
+        state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=state.username)
+        # Use HSETNX to only set non-existing fields
+        mapping = {
+            "points": state.points,
+            "role": state.role or "",
+            "secret_missions": json.dumps(state.secret_missions),
+            "connected": json.dumps(state.connected),
+        }
+        for field_name, value in mapping.items():
+            # hsetnx returns True if field was set
+            self.redis.hsetnx(state_key, field_name, value)
