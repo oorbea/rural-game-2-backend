@@ -4,6 +4,7 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_smorest import Api
 from flask_migrate import Migrate, upgrade as alembic_upgrade
+from flask_socketio import SocketIO, emit, join_room, leave_room
 import redis
 
 from controllers.GameController import GameController
@@ -105,5 +106,6 @@ def create_app(settings_module: str | None = None):
 
 app = create_app(os.getenv('SETTINGS_MODULE', None))
 
-if __name__ == "__main__":    
-    app.run(threaded=True, host="0.0.0.0", port=app.config.get('PORT', 5000), debug=app.config.get('DEBUG', False), use_reloader=app.config.get('DEBUG', False))
+if __name__ == "__main__":
+    socketio = SocketIO(app, cors_allowed_origins='*')
+    socketio.run(app, threaded=True, host="0.0.0.0", port=app.config.get('PORT', 5000), debug=app.config.get('DEBUG', False), use_reloader=app.config.get('DEBUG', False))
