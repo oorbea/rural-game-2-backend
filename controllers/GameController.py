@@ -236,7 +236,6 @@ class GameController:
         if not self.redis.exists(lobby_key):
             raise ValueError(f"Lobby {code} does not exist")
         lobby_meta:dict = self.redis.hgetall(lobby_key)
-        # Parse integers where appropriate
         if "current_turn" in lobby_meta:
             try:
                 lobby_meta["current_turn"] = int(lobby_meta["current_turn"])
@@ -247,8 +246,6 @@ class GameController:
         for name in player_names:
             state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=name)
             raw_state = self.redis.hgetall(state_key)
-            # Convert JSON encoded fields
-            # points stored as string by Redis; convert to int
             points_str = raw_state.get("points", "0")
             try:
                 points = int(points_str)
@@ -276,6 +273,15 @@ class GameController:
             "players": players_state,
             "order": player_names,
         }
+    
+    def get_connected_players(self, code: str) -> list[str]:
+        """Retrieve a list of players currently connected to the lobby."""
+        lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
+        if not self.redis.exists(lobby_key):
+            raise ValueError(f"Lobby {code} does not exist")
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+        player_names = self.redis.lrange(players_list_key, 0, -1)
+        return player_names
 
     # ------------------------------------------------------------------
     # Internal helpers

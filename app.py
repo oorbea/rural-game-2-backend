@@ -1,3 +1,4 @@
+from importlib import import_module
 import os
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -9,7 +10,12 @@ import redis
 
 from controllers.GameController import GameController
 from db import create_db
+
 from resources.Challenge import blp as ChallengeBlueprint
+
+from events.LobbyEvents import LobbyEvents
+
+socketio = SocketIO(message_queue="redis://redis:6379/0", cors_allowed_origins='*')
 
 def create_app(settings_module: str | None = None):
     """
@@ -67,6 +73,7 @@ def create_app(settings_module: str | None = None):
     app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024
     
     def getApiPrefix(url:str) -> str: return f"{app.config['API_PREFIX']}/{url}"
+    def getSocketIOPrefix(url:str) -> str: return f"{app.config['SOCKETIO_PREFIX']}/{url}"
 
     jwt = JWTManager(app)
 
@@ -76,12 +83,26 @@ def create_app(settings_module: str | None = None):
         'jwt', {'type': 'http', 'scheme': 'bearer', 'bearerFormat': 'JWT', 'x-bearerInfoFunc': 'app.decode_token'}
     )
 
-    api.register_blueprint(ChallengeBlueprint, url_prefix=getApiPrefix('challenge'))
+    socketio.init_app(app, cors_allowed_origins='*')
 
     r = redis.Redis(host="redis", port=6379, decode_responses=True)
-    challenge_module = __import__(app.config.get('CHALLENGE_PROVIDER_MODULE', 'controllers.TurnManager'), fromlist=['TurnManager'])
-    global game_controller
-    game_controller = GameController(r, challenge_module.TurnManager())
+    module_name = app.config.get('CHALLENGE_PROVIDER_MODULE', 'controllers.TurnManager')
+    try:
+        turn_module = import_module(module_name)
+        turn_manager = turn_module.TurnManager()
+        app.extensions['game_controller'] = GameController(r, turn_manager)
+    except ImportError as e:
+        raise ImportError(f"Failed to import module '{module_name}': {e}")
+    except AttributeError as e:
+        raise AttributeError(f"Module '{module_name}' does not have 'TurnManager' class: {e}")
+    except Exception as e:
+        raise Exception(f"An error occurred while initializing the game controller: {e}")
+
+    # HTTP routes
+    api.register_blueprint(ChallengeBlueprint, url_prefix=getApiPrefix('challenge'))
+
+    # SocketIO events
+    socketio.on_namespace(LobbyEvents(getSocketIOPrefix('lobby')))
 
     with app.app_context():
         db = create_db(app)
@@ -107,5 +128,4 @@ def create_app(settings_module: str | None = None):
 app = create_app(os.getenv('SETTINGS_MODULE', None))
 
 if __name__ == "__main__":
-    socketio = SocketIO(app, cors_allowed_origins='*')
-    socketio.run(app, threaded=True, host="0.0.0.0", port=app.config.get('PORT', 5000), debug=app.config.get('DEBUG', False), use_reloader=app.config.get('DEBUG', False))
+    socketio.run(app, host="0.0.0.0", port=app.config.get('PORT', 5000), debug=app.config.get('DEBUG', False), use_reloader=app.config.get('DEBUG', False))
