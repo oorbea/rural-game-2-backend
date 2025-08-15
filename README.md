@@ -7,7 +7,7 @@ A real-time multiplayer drinking game backend API built with Flask, Socket.IO, a
 Rural Game 2 is a turn-based multiplayer drinking game where players are assigned challenges, truth-or-dare tasks, and other activities to complete for points. The backend handles real-time communication through WebSockets, manages game state with Redis, and persists data in a MySQL database.
 
 **Developed by:** 6 computer science students from FIB - UPC (Barcelona)
-- 3 students working on frontend/react app
+- 3 students working on frontend/react app [Check it too!](https://github.com/Yearsuck/Rural_Game-Frontend)
 - 3 students working on backend/devops
 
 ## Features
