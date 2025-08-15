@@ -35,3 +35,9 @@ class PlayerManager(ABC):
         :returns: a PlayerState object containing the player's dynamic state
         """
         raise NotImplementedError("This method should be implemented by subclasses")
+    
+    @abstractmethod
+    def remove_player(self, code: str, username: str) -> str | None:
+        """Remove a player from a lobby, delete their profile picture on disk,
+        and return the resulting host (None if lobby deleted)."""
+        raise NotImplementedError("This method should be implemented by subclasses")

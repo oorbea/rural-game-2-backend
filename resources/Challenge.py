@@ -20,13 +20,13 @@ blp = Blueprint('challenge', __name__, description='Challenge related CRUD opera
 @blp.route('')
 class ChallengeCRUD(MethodView):
     """Handles CRUD operations for challenges."""
+    @login_required
     @blp.arguments(GetChallengeSchema, location='query')
     @blp.response(200, ChallengeSchema(many=True))
     @blp.response(400, description='Bad request')
     @blp.response(401, description='Invalid token')
     @blp.response(403, description='You do not have permission for this operation')
     @blp.response(500, description='Internal server error.')
-    @login_required
     def get(self, data):
         try: 
             data = GetChallengeSchema().load(data)
@@ -88,6 +88,7 @@ class ChallengeCRUD(MethodView):
             traceback.print_exc()
             abort(500, message='Internal server error.')
 
+    @admin_required
     @blp.arguments(ChallengeSchema)
     @blp.response(201, description='Challenge created.')
     @blp.response(400, description='Bad request')
@@ -95,7 +96,6 @@ class ChallengeCRUD(MethodView):
     @blp.response(403, description='You do not have permission for this operation')
     @blp.response(409, description='Conflict.')
     @blp.response(500, description='Internal server error.')
-    @admin_required
     def post(self, data): 
         try:
             data = ChallengeSchema().load(data) 
@@ -117,6 +117,7 @@ class ChallengeCRUD(MethodView):
             db.session.rollback()
             abort(500, message='Internal server error.')
 
+    @admin_required
     @blp.arguments(ChallengeSchema)
     @blp.arguments(TitleChallengeSchema, location='query')
     @blp.response(204, description='Challenge updated.')
@@ -125,7 +126,6 @@ class ChallengeCRUD(MethodView):
     @blp.response(403, description='You do not have permission for this operation')
     @blp.response(404, description='Title not found.')
     @blp.response(500, description='Internal server error.')
-    @admin_required
     def put(self, bodydata, querydata):
         try:
             querydata = TitleChallengeSchema().load(querydata) 
@@ -152,6 +152,7 @@ class ChallengeCRUD(MethodView):
             db.session.rollback()
             abort(500, message='Internal server error.')
 
+    @admin_required
     @blp.arguments(GetChallengeSchema)
     @blp.arguments(TitleChallengeSchema, location='query')
     @blp.response(200, ChallengeSchema, description='Challenge updated.')
@@ -160,7 +161,6 @@ class ChallengeCRUD(MethodView):
     @blp.response(403, description='You do not have permission for this operation')
     @blp.response(404, description='Title not found.')
     @blp.response(500, description='Internal server error.')
-    @admin_required 
     def patch(self, bodydata, querydata):
         try:
             querydata = TitleChallengeSchema().load(querydata) 
@@ -188,6 +188,7 @@ class ChallengeCRUD(MethodView):
             abort(500, message='Internal server error.')
 
 
+    @admin_required
     @blp.arguments(TitleChallengeSchema, location='query')
     @blp.response(204, description='Challenge deleted.')
     @blp.response(400, description='Bad request')
@@ -195,7 +196,6 @@ class ChallengeCRUD(MethodView):
     @blp.response(403, description='You do not have permission for this operation')
     @blp.response(404, description='Title not found.')
     @blp.response(500, description='Internal server error.')
-    @admin_required
     def delete(self, data):
         try:
             data = TitleChallengeSchema().load(data) 
@@ -253,6 +253,7 @@ class ChallengeImg(MethodView):
             }
         }
     )
+    @admin_required
     @blp.arguments(TitleChallengeSchema, location='query')
     @blp.response(200, ChallengeSchema, description='Challenge updated.')
     @blp.response(400, description='Bad request')
@@ -260,7 +261,6 @@ class ChallengeImg(MethodView):
     @blp.response(403, description='You do not have permission for this operation')
     @blp.response(404, description='Title not found.')
     @blp.response(500, description='Internal server error.')
-    @admin_required 
     def patch(self, querydata):
         try:
 
@@ -300,6 +300,7 @@ class ChallengeImg(MethodView):
             abort(500, message='Internal server error.')
 
     
+    @login_required
     @blp.arguments(TitleChallengeSchema, location='query')
     @blp.response(200, description='Icon found.')
     @blp.response(204, description='Icon not found.')
@@ -308,7 +309,6 @@ class ChallengeImg(MethodView):
     @blp.response(403, description='You do not have permission for this operation')
     @blp.response(404, description='Challenge not found.')
     @blp.response(500, description='Internal server error.')
-    @login_required
     def get(self, data):
         try: 
             data = GetChallengeSchema().load(data)
@@ -338,6 +338,3 @@ class ChallengeImg(MethodView):
             traceback.print_exc()
             db.session.rollback()
             abort(500, message='Internal server error.')
-        
-
-            

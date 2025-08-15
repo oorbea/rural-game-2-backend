@@ -1,4 +1,5 @@
 import json
+import os
 from typing import Any
 
 import redis
@@ -17,6 +18,14 @@ class PlayerManager(IPlayerManager):
 
     def __init__(self, redis_client: redis.Redis) -> None:
         self.redis = redis_client
+        self._base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+    def _resolve_fs(self, path: str | None) -> str | None:
+        if not path:
+            return None
+        if os.path.isabs(path):
+            return path
+        return os.path.join(self._base_dir, path.lstrip('/'))
 
     def update_player_info(self, code: str, current_username: str, new_info: dict[str, Any]) -> None:
         """Update a player's static information in the lobby.
@@ -136,12 +145,12 @@ class PlayerManager(IPlayerManager):
                     continue
                 
     def get_player_info(self, code: str, username: str) -> PlayerInfo:
-        """Retrieve a player's static information in the lobby."""
+        """Retrieve a player's static information in the lobby (profile_pic as file bytes)."""
         if not self.redis.sismember(self.ACTIVE_LOBBIES_SET, code):
             raise ValueError(f"Lobby {code} does not exist or is not active")
 
         players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
-        players:list[str] = self.redis.lrange(players_list_key, 0, -1)
+        players: list[str] = self.redis.lrange(players_list_key, 0, -1)
         if username not in players:
             raise ValueError(f"Player '{username}' is not in lobby {code}")
 
@@ -171,7 +180,7 @@ class PlayerManager(IPlayerManager):
                 pass
             return bool(s)
 
-        profile_pic = data.get("profile_pic")
+        profile_pic_path = data.get("profile_pic")
 
         gender_raw = data.get("gender")
         if gender_raw is None:
@@ -185,6 +194,16 @@ class PlayerManager(IPlayerManager):
         except Exception as e:
             raise ValueError(f"Invalid gender value '{gender_raw}' for user '{username}'") from e
 
+        profile_pic_bytes = None
+        if profile_pic_path:
+            abs_path = self._resolve_fs(profile_pic_path)
+            if abs_path and os.path.exists(abs_path):
+                try:
+                    with open(abs_path, 'rb') as f:
+                        profile_pic_bytes = f.read()
+                except Exception:
+                    profile_pic_bytes = None
+
         return PlayerInfo(
             username=username,
             drinking=_as_bool(data.get("drinking")),
@@ -192,9 +211,8 @@ class PlayerManager(IPlayerManager):
             partnered=_as_bool(data.get("partnered")),
             virgin=_as_bool(data.get("virgin")),
             gender=gender,
-            profile_pic=profile_pic,
+            profile_pic=profile_pic_bytes,
         )
-
 
     def get_player_state(self, code: str, username: str) -> PlayerState:
         """Retrieve a player's dynamic state in the lobby."""
@@ -264,3 +282,72 @@ class PlayerManager(IPlayerManager):
             secret_missions=missions,
             connected=connected,
         )
+
+    def remove_player(self, code: str, username: str) -> str | None:
+        """Remove a player from a lobby, delete their profile picture on disk,
+        and return the resulting host (None if lobby deleted)."""
+        if not self.redis.sismember(self.ACTIVE_LOBBIES_SET, code):
+            raise ValueError(f"Lobby {code} does not exist or is not active")
+
+        lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+        state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=username)
+        user_key = self.USER_INFO_TEMPLATE.format(username=username)
+
+        def _b2s(x):
+            """Convert bytes to string, if applicable."""
+            return x.decode() if isinstance(x, (bytes, bytearray)) else x
+
+        old_pic_path: str | None = None
+
+        with self.redis.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(players_list_key, lobby_key, user_key)
+
+                    players: list[str] = [_b2s(p) for p in pipe.lrange(players_list_key, 0, -1)]
+                    if username not in players:
+                        pipe.unwatch()
+                        host_raw = self.redis.hget(lobby_key, "host")
+                        return _b2s(host_raw)
+
+                    host_raw = pipe.hget(lobby_key, "host")
+                    host_val = _b2s(host_raw)
+
+                    old_pic_path = _b2s(pipe.hget(user_key, "profile_pic"))
+
+                    remaining = [p for p in players if p != username]
+                    new_len = len(remaining)
+                    next_host = remaining[0] if new_len > 0 else None
+
+                    if new_len == 0:
+                        result_host = None
+                    else:
+                        result_host = next_host if (not host_val or host_val == username) else host_val
+
+                    pipe.multi()
+                    pipe.lrem(players_list_key, 0, username)
+                    pipe.delete(state_key)
+                    pipe.hdel(user_key, "profile_pic")
+
+                    if new_len == 0:
+                        pipe.delete(players_list_key)
+                        pipe.delete(lobby_key)
+                        pipe.srem(self.ACTIVE_LOBBIES_SET, code)
+                    else:
+                        if (not host_val) or (host_val == username):
+                            pipe.hset(lobby_key, "host", result_host)
+
+                    pipe.execute()
+                    break
+                except redis.WatchError:
+                    continue
+
+        try:
+            old_fs = self._resolve_fs(old_pic_path)
+            if old_fs and os.path.exists(old_fs):
+                os.remove(old_fs)
+        except Exception:
+            pass
+
+        return result_host

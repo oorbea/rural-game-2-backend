@@ -13,6 +13,7 @@ from db import create_db
 
 from resources.socket_docs import blp as SocketDocsBlueprint
 from resources.Challenge import blp as ChallengeBlueprint
+from resources.UserPicture import blp as UserPictureBlueprint
 
 from events.LobbyEvents import LobbyEvents
 
@@ -105,6 +106,7 @@ def create_app(settings_module: str | None = None):
     # HTTP routes
     api.register_blueprint(SocketDocsBlueprint, url_prefix=getApiPrefix('docs'))
     api.register_blueprint(ChallengeBlueprint, url_prefix=getApiPrefix('challenge'))
+    api.register_blueprint(UserPictureBlueprint, url_prefix=getApiPrefix(''))
 
     # SocketIO events
     socketio.on_namespace(LobbyEvents(getSocketIOPrefix('lobby')))

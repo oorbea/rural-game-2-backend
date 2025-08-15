@@ -3,20 +3,29 @@ info:
   title: Rural Game 2 Real-Time API
   version: '{{API_VERSION}}'
   description: |
-    Real-time API for lobby management and game control in Rural Game 2. This
-    specification describes the Socket.IO events used to manage lobbies,
-    handle player actions and broadcast game state. The events are
-    published and subscribed over a WebSocket endpoint using Socket.IO.
+    Real-time API for lobby management and game control in Rural Game 2.
+    This specification describes the Socket.IO events used to manage lobbies,
+    handle player actions and broadcast game state. The events are published
+    and subscribed over a WebSocket endpoint using Socket.IO. Profile pictures
+    are served over HTTP but referenced in events via absolute URLs.
 
 servers:
   production:
     url: ws://ruralgame.ddns.net{PREFIX}/lobby
     protocol: ws
     description: Production WebSocket server for the lobby namespace.
+    variables:
+      PREFIX:
+        default: /api/v1
+        description: API prefix (namespace root)
   local:
     url: ws://localhost:5000{PREFIX}/lobby
     protocol: ws
-    description: Local development WebSocket server (Flask-SocketIO)
+    description: Local development WebSocket server (Flask-SocketIO).
+    variables:
+      PREFIX:
+        default: /api/v1
+        description: API prefix (namespace root)
 
 channels:
   create_lobby:
@@ -26,6 +35,7 @@ channels:
       summary: Create a new lobby with the provided player information.
       message:
         $ref: '#/components/messages/CreateLobby'
+
   join_lobby:
     description: Client requests to join a lobby.
     publish:
@@ -33,6 +43,7 @@ channels:
       summary: Join an existing lobby by code.
       message:
         $ref: '#/components/messages/JoinLobby'
+
   leave_lobby:
     description: Client requests to leave a lobby.
     publish:
@@ -40,6 +51,7 @@ channels:
       summary: Leave the specified lobby.
       message:
         $ref: '#/components/messages/LeaveLobby'
+
   start_game:
     description: Client requests to start the game for a lobby.
     publish:
@@ -47,6 +59,7 @@ channels:
       summary: Start the game in the specified lobby.
       message:
         $ref: '#/components/messages/StartGame'
+
   update_player:
     description: Client requests to update their player information.
     publish:
@@ -54,6 +67,15 @@ channels:
       summary: Update player information in the lobby.
       message:
         $ref: '#/components/messages/UpdatePlayer'
+
+  update_profile_picture:
+    description: Client requests to add, replace or remove a player's profile picture.
+    publish:
+      operationId: updateProfilePicture
+      summary: Update a player's profile picture (send base64 or data URL; or remove it).
+      message:
+        $ref: '#/components/messages/UpdateProfilePicture'
+
   get_user_info:
     description: Client requests to get their own player information.
     publish:
@@ -61,6 +83,7 @@ channels:
       summary: Retrieve the player's own information.
       message:
         $ref: '#/components/messages/GetUserInfo'
+
   player_joined:
     description: Notification sent when a player joins a lobby.
     subscribe:
@@ -68,6 +91,7 @@ channels:
       summary: Receive information about the player that just joined.
       message:
         $ref: '#/components/messages/PlayerJoined'
+
   player_left:
     description: Notification sent when a player leaves a lobby.
     subscribe:
@@ -75,6 +99,7 @@ channels:
       summary: Receive information about the player that just left.
       message:
         $ref: '#/components/messages/PlayerLeft'
+
   game_started:
     description: Notification sent when the game starts.
     subscribe:
@@ -82,6 +107,7 @@ channels:
       summary: Receive the initial game state after the game has started.
       message:
         $ref: '#/components/messages/GameStarted'
+
   player_updated:
     description: Notification sent when a player updates their information.
     subscribe:
@@ -89,6 +115,15 @@ channels:
       summary: Receive updated player information after a player update.
       message:
         $ref: '#/components/messages/PlayerUpdated'
+
+  profile_picture_updated:
+    description: Notification sent when a player's profile picture is updated or removed.
+    subscribe:
+      operationId: profilePictureUpdated
+      summary: Receive the new profile picture URL (or removal flag).
+      message:
+        $ref: '#/components/messages/ProfilePictureUpdated'
+
   error:
     description: Error notifications related to lobby or game operations.
     subscribe:
@@ -110,6 +145,7 @@ components:
         properties:
           player:
             $ref: '#/components/schemas/PlayerInfo'
+
     JoinLobby:
       name: JoinLobby
       title: Join Lobby
@@ -121,10 +157,10 @@ components:
           - player
         properties:
           code:
-            type: string
-            description: Unique 4-digit lobby code.
+            $ref: '#/components/schemas/LobbyCode'
           player:
             $ref: '#/components/schemas/PlayerInfo'
+
     LeaveLobby:
       name: LeaveLobby
       title: Leave Lobby
@@ -136,11 +172,11 @@ components:
           - player_name
         properties:
           code:
-            type: string
-            description: Lobby code to leave.
+            $ref: '#/components/schemas/LobbyCode'
           player_name:
             type: string
             description: Username of the player leaving.
+
     StartGame:
       name: StartGame
       title: Start Game
@@ -152,11 +188,11 @@ components:
           - player_name
         properties:
           code:
-            type: string
-            description: Lobby code where the game should start.
+            $ref: '#/components/schemas/LobbyCode'
           player_name:
             type: string
             description: Host username who is starting the game.
+
     UpdatePlayer:
       name: UpdatePlayer
       title: Update Player
@@ -168,8 +204,7 @@ components:
           - current_username
         properties:
           code:
-            type: string
-            description: Lobby code where the player is located.
+            $ref: '#/components/schemas/LobbyCode'
           current_username:
             type: string
             description: Current username of the player to update.
@@ -191,10 +226,14 @@ components:
           gender:
             $ref: '#/components/schemas/GenderEnum'
             description: Gender of the player (optional).
-          profile_pic:
-            type: string
-            nullable: true
-            description: Optional URL or identifier for the player's profile picture.
+
+    UpdateProfilePicture:
+      name: UpdateProfilePicture
+      title: Update Profile Picture
+      summary: Add/replace/remove a player's profile picture in a lobby.
+      payload:
+        $ref: '#/components/schemas/UpdateProfilePicturePayload'
+
     GetUserInfo:
       name: GetUserInfo
       title: Get User Info
@@ -206,11 +245,11 @@ components:
           - player_name
         properties:
           code:
-            type: string
-            description: Lobby code where the player is located.
+            $ref: '#/components/schemas/LobbyCode'
           player_name:
             type: string
             description: Username of the player requesting their information.
+
     PlayerJoined:
       name: PlayerJoined
       title: Player Joined
@@ -223,6 +262,12 @@ components:
           player:
             type: string
             description: Username of the player who joined.
+          profile_picture_url:
+            type: string
+            format: uri
+            nullable: true
+            description: Absolute URL to the player's profile picture (may include cache-buster).
+
     PlayerLeft:
       name: PlayerLeft
       title: Player Left
@@ -239,13 +284,15 @@ components:
           host:
             type: string
             nullable: true
-            description: Username of the current host after the player left or null if the lobby has been removed.
+            description: Username of the current host after the player left, or null if the lobby was removed.
+
     GameStarted:
       name: GameStarted
       title: Game Started
       summary: Notification that the game has started and includes the full game state.
       payload:
         $ref: '#/components/schemas/GameState'
+
     PlayerUpdated:
       name: PlayerUpdated
       title: Player Updated
@@ -262,6 +309,34 @@ components:
           new_username:
             type: string
             description: New username of the player.
+          profile_picture_url:
+            type: string
+            format: uri
+            nullable: true
+            description: Absolute URL to the player's current profile picture (may include cache-buster).
+
+    ProfilePictureUpdated:
+      name: ProfilePictureUpdated
+      title: Profile Picture Updated
+      summary: Notification that a player's profile picture has changed or was removed.
+      payload:
+        type: object
+        required:
+          - player
+          - removed
+        properties:
+          player:
+            type: string
+            description: Username whose picture changed.
+          profile_picture_url:
+            type: string
+            format: uri
+            nullable: true
+            description: Absolute URL to the new profile picture (present when removed = false).
+          removed:
+            type: boolean
+            description: True if the picture was removed; otherwise false.
+
     Error:
       name: Error
       title: Error
@@ -274,12 +349,18 @@ components:
             description: Human-readable error message.
 
   schemas:
+    LobbyCode:
+      type: string
+      description: Unique 4-digit lobby code.
+      pattern: '^[0-9]{4}$'
+
     GenderEnum:
       type: string
       description: Gender of the player.
       enum:
         - male
         - female
+
     PlayerInfo:
       type: object
       description: Static information about a player provided when they join a lobby.
@@ -311,7 +392,8 @@ components:
         profile_pic:
           type: string
           nullable: true
-          description: Optional URL or identifier for the player's profile picture.
+          description: Optional identifier for the player's profile picture (generally not used at join time).
+
     PlayerState:
       type: object
       description: Dynamic state of a player within a lobby.
@@ -339,6 +421,20 @@ components:
         connected:
           type: boolean
           description: Indicates if the player is currently connected via websocket.
+
+    ConnectedPlayer:
+      type: object
+      description: Connected player plus a URL to their profile picture.
+      required:
+        - username
+      properties:
+        username:
+          type: string
+        profile_picture_url:
+          type: string
+          format: uri
+          nullable: true
+
     GameState:
       type: object
       description: Full state of a lobby including lobby metadata, players and turn order.
@@ -356,3 +452,47 @@ components:
           items:
             type: string
           description: Ordered list of usernames representing turn rotation.
+
+    UpdateProfilePicturePayload:
+      type: object
+      description: |
+        Update or remove a player's profile picture. To remove the picture, set `remove: true`.
+        To upload/replace, send either `data_url` (preferred) or `image_base64` along with
+        `extension` (or infer it from `filename`).
+      required:
+        - code
+        - player_name
+      properties:
+        code:
+          $ref: '#/components/schemas/LobbyCode'
+        player_name:
+          type: string
+          description: Username whose picture will be updated.
+        remove:
+          type: boolean
+          default: false
+          description: When true, removes the current profile picture.
+        data_url:
+          type: string
+          description: Data URL of the image (e.g. "data:image/png;base64,<...>").
+          pattern: '^data:image\/[A-Za-z0-9]+;base64,.+'
+        image_base64:
+          type: string
+          description: Raw base64-encoded image bytes (use when not sending a full data URL).
+        extension:
+          type: string
+          description: File extension to use when saving the image (ignored if `data_url` provides it).
+          enum: [png, jpg, jpeg, gif]
+        filename:
+          type: string
+          description: Optional original filename (may be used to infer extension).
+      anyOf:
+        - properties:
+            remove:
+              const: true
+          required: [code, player_name, remove]
+          description: Remove the current profile picture.
+        - anyOf:
+            - required: [code, player_name, data_url]
+            - required: [code, player_name, image_base64, extension]
+          description: Upload or replace the profile picture.

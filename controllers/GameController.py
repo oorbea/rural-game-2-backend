@@ -316,14 +316,30 @@ class GameController:
             "order": player_names,
         }
     
-    def get_connected_players(self, code: str) -> list[str]:
-        """Retrieve a list of players currently connected to the lobby."""
+    def get_connected_players(self, code: str) -> list[dict[str, Any]]:
+        """Return connected players with their profile picture bytes (not path)."""
         lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
         if not self.redis.exists(lobby_key):
             raise ValueError(f"Lobby {code} does not exist")
+
         players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
-        player_names = self.redis.lrange(players_list_key, 0, -1)
-        return player_names
+        player_names: list[str] = self.redis.lrange(players_list_key, 0, -1)
+
+        result: list[dict[str, Any]] = []
+        for name in player_names:
+            try:
+                info: PlayerInfo = self.player_manager.get_player_info(code, name)
+                result.append({
+                    "username": name,
+                    "profile_picture": info.profile_pic
+                })
+            except Exception:
+                result.append({
+                    "username": name,
+                    "profile_picture": None
+                })
+        return result
+
     
     def update_player_info(self, code: str, current_username: str, new_info: dict[str, Any]):
         """Update a player's static information in the lobby.
