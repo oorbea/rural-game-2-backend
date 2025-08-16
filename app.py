@@ -1,6 +1,6 @@
 from importlib import import_module
 import os
-from flask import Flask, jsonify
+from flask import Flask, jsonify, redirect
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_smorest import Api
@@ -11,6 +11,7 @@ import redis
 from controllers.GameController import GameController
 from db import create_db
 
+from resources.MainPage import blp as MainPageBlueprint
 from resources.socket_docs import blp as SocketDocsBlueprint
 from resources.Challenge import blp as ChallengeBlueprint
 from resources.UserPicture import blp as UserPictureBlueprint
@@ -104,6 +105,7 @@ def create_app(settings_module: str | None = None):
         raise Exception(f"An error occurred while initializing the game controller: {e}")
 
     # HTTP routes
+    api.register_blueprint(MainPageBlueprint, url_prefix=getApiPrefix(''))
     api.register_blueprint(SocketDocsBlueprint, url_prefix=getApiPrefix('docs'))
     api.register_blueprint(ChallengeBlueprint, url_prefix=getApiPrefix('challenge'))
     api.register_blueprint(UserPictureBlueprint, url_prefix=getApiPrefix(''))
@@ -129,6 +131,12 @@ def create_app(settings_module: str | None = None):
             "status": "Not Implemented"
         }
         return jsonify(response), 501
+    
+    @app.route('/')
+    def main_page():
+        """Returns the main page of the API documentation."""
+        return redirect(app.config['API_PREFIX'], code=302)
+        
     
     return app
 
