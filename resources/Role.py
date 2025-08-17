@@ -12,74 +12,48 @@ from sqlalchemy import or_
 from db import db 
 from werkzeug.exceptions import NotFound
 from werkzeug.utils import secure_filename
-from globals import ALLOWED_PICTURE_EXTENSIONS, CHALLENGE_PICTURES_DIR
-from models.Challenge import Challenge
-from schemas import ChallengeSchema, GetChallengeSchema, TitleChallengeSchema
+from globals import ALLOWED_PICTURE_EXTENSIONS, ROLE_PICTURES_DIR
+from models.Role import Role
+from schemas import GetRoleSchema, RoleSchema, TitleRoleSchema
 
-blp = Blueprint('challenge', __name__, description='Challenge related CRUD operations.')
+blp = Blueprint('role', __name__, description='Role related CRUD operations.')
 
 @blp.route('')
-class ChallengeCRUD(MethodView):
-    """Handles CRUD operations for challenges."""
+class RoleCRUD(MethodView):
+    """CRUD operations for roles."""
     @login_required
-    @blp.arguments(GetChallengeSchema, location='query')
-    @blp.response(200, ChallengeSchema(many=True))
+    @blp.arguments(GetRoleSchema, location='query')
+    @blp.response(200, RoleSchema(many=True))
     @blp.response(400, description='Bad request')
     @blp.response(401, description='Invalid token')
     @blp.response(403, description='You do not have permission for this operation')
     @blp.response(500, description='Internal server error.')
     def get(self, data):
         try: 
-            data = GetChallengeSchema().load(data)
+            data = GetRoleSchema().load(data)
             filters = []
             getTitle = request.args.get('title')
             if getTitle is not None :
-                filters.append(Challenge.title == getTitle)
+                filters.append(Role.title == getTitle)
 
             getDescription = request.args.get('description')
             if getDescription is not None :
-                filters.append(Challenge.description == getDescription)
+                filters.append(Role.description == getDescription)
 
-            getSex = request.args.get('sex')
-            if getSex is not None :
-                filters.append(Challenge.sex == getSex)
+            getQuantityPerGame = request.args.get('quantity_per_game')
+            if getQuantityPerGame is not None :
+                filters.append(Role.quantity_per_game == getQuantityPerGame)
 
-            getDrink = request.args.get('drinking')
-            if getDrink is not None :
-                filters.append(Challenge.drinking == getDrink)
+            getPriority = request.args.get('priority')
+            if getPriority is not None :
+                filters.append(Role.priority == getPriority)
 
-            getSmoking = request.args.get('smoking')
-            if getSmoking is not None :
-                filters.append(Challenge.smoking == getSmoking)
-            
-            getPartnerFriendly = request.args.get('partner_friendly')
-            if getPartnerFriendly is not None :
-                filters.append(Challenge.partner_friendly == getPartnerFriendly)
-            
-            getProbability = request.args.get('probability')
-            if getProbability is not None :
-                filters.append(Challenge.probability == getProbability)
-            
-            getSkipping = request.args.get('skipping')
-            if getSkipping is not None :
-                if getSkipping.lower() == 'null':
-                    filters.append(Challenge.skipping is None)
-                else:
-                    filters.append(Challenge.skipping == getSkipping)
-
-            getVoting = request.args.get('voting')
-            if getVoting is not None :
-                filters.append(Challenge.voting == getVoting)
-
-            getPrize = request.args.get('prize')
-            if getPrize is not None :
-                filters.append(Challenge.prize == getPrize)
-
+            roles:list[Role] = []
             if len(filters) > 0:
-                challenges = Challenge.query.filter(or_(*filters)).all()
+                roles = Role.query.filter(or_(*filters)).all()
             else:
-                challenges = Challenge.query.all()
-            return jsonify([challenge.to_dict() for challenge in challenges])
+                roles = Role.query.all()
+            return jsonify([role.to_dict() for role in roles])
         
         except ValidationError as error:
             traceback.print_exc()
@@ -90,8 +64,8 @@ class ChallengeCRUD(MethodView):
             abort(500, message='Internal server error.')
 
     @admin_required
-    @blp.arguments(ChallengeSchema)
-    @blp.response(201, description='Challenge created.')
+    @blp.arguments(RoleSchema)
+    @blp.response(201, description='Role created.')
     @blp.response(400, description='Bad request')
     @blp.response(401, description='Invalid token')
     @blp.response(403, description='You do not have permission for this operation')
@@ -99,9 +73,9 @@ class ChallengeCRUD(MethodView):
     @blp.response(500, description='Internal server error.')
     def post(self, data): 
         try:
-            data = ChallengeSchema().load(data) 
-            challenge = Challenge(**data)
-            db.session.add(challenge) 
+            data = RoleSchema().load(data) 
+            role = Role(**data)
+            db.session.add(role) 
             db.session.commit()
             return Response(status=201)
 
@@ -111,7 +85,7 @@ class ChallengeCRUD(MethodView):
 
         except IntegrityError as error:
             db.session.rollback()
-            abort(409, message='Challenge with the same title already exists.')
+            abort(409, message='Role with the same title already exists.')
 
         except Exception as error:
             traceback.print_exc()
@@ -119,9 +93,9 @@ class ChallengeCRUD(MethodView):
             abort(500, message='Internal server error.')
 
     @admin_required
-    @blp.arguments(ChallengeSchema)
-    @blp.arguments(TitleChallengeSchema, location='query')
-    @blp.response(204, description='Challenge updated.')
+    @blp.arguments(RoleSchema)
+    @blp.arguments(TitleRoleSchema, location='query')
+    @blp.response(204, description='Role updated.')
     @blp.response(400, description='Bad request')
     @blp.response(401, description='Invalid token')
     @blp.response(403, description='You do not have permission for this operation')
@@ -129,24 +103,24 @@ class ChallengeCRUD(MethodView):
     @blp.response(500, description='Internal server error.')
     def put(self, bodydata, querydata):
         try:
-            querydata = TitleChallengeSchema().load(querydata) 
-            challenge = Challenge.query.get(querydata.get("title"))
-            if challenge is not None:
-                bodydata = ChallengeSchema().load(bodydata) 
+            querydata = TitleRoleSchema().load(querydata) 
+            role = Role.query.get(querydata.get("title"))
+            if role is not None:
+                bodydata = RoleSchema().load(bodydata) 
                 for key, value in bodydata.items():
-                    if hasattr(challenge, key):
-                        setattr(challenge, key, value)
+                    if hasattr(role, key):
+                        setattr(role, key, value)
                 db.session.commit()
                 return Response(status=204)
             else:
-                abort(404, message='Title not found.')
+                abort(404, message='Role not found.')
 
         except ValidationError as error:
             traceback.print_exc()
             abort(400, message=str(error))
 
         except NotFound as error:
-            abort(404, message='Title not found.')
+            abort(404, message='Role not found.')
 
         except Exception as error:
             traceback.print_exc()
@@ -154,9 +128,9 @@ class ChallengeCRUD(MethodView):
             abort(500, message='Internal server error.')
 
     @admin_required
-    @blp.arguments(GetChallengeSchema)
-    @blp.arguments(TitleChallengeSchema, location='query')
-    @blp.response(200, ChallengeSchema, description='Challenge updated.')
+    @blp.arguments(GetRoleSchema)
+    @blp.arguments(TitleRoleSchema, location='query')
+    @blp.response(200, RoleSchema, description='Role updated.')
     @blp.response(400, description='Bad request')
     @blp.response(401, description='Invalid token')
     @blp.response(403, description='You do not have permission for this operation')
@@ -164,34 +138,33 @@ class ChallengeCRUD(MethodView):
     @blp.response(500, description='Internal server error.')
     def patch(self, bodydata, querydata):
         try:
-            querydata = TitleChallengeSchema().load(querydata) 
-            challenge = Challenge.query.get(querydata.get("title"))
-            if challenge is not None:
-                bodydata = GetChallengeSchema().load(bodydata) 
+            querydata = TitleRoleSchema().load(querydata) 
+            role:Role = Role.query.get(querydata.get("title"))
+            if role is not None:
+                bodydata = GetRoleSchema().load(bodydata) 
                 for key, value in bodydata.items():
-                    if hasattr(challenge, key):
-                        setattr(challenge, key, value)
+                    if hasattr(role, key):
+                        setattr(role, key, value)
                 db.session.commit()
-                return jsonify(challenge.to_dict()) 
+                return jsonify(role.to_dict()) 
             else:
-                abort(404, message='Title not found.')
+                abort(404, message='Role not found.')
         
         except ValidationError as error:
             traceback.print_exc()
             abort(400, message=str(error))
 
         except NotFound as error:
-            abort(404, message='Title not found.')
+            abort(404, message='Role not found.')
 
         except Exception as error:
             traceback.print_exc()
             db.session.rollback()
             abort(500, message='Internal server error.')
 
-
     @admin_required
-    @blp.arguments(TitleChallengeSchema, location='query')
-    @blp.response(204, description='Challenge deleted.')
+    @blp.arguments(TitleRoleSchema, location='query')
+    @blp.response(204, description='Role deleted.')
     @blp.response(400, description='Bad request')
     @blp.response(401, description='Invalid token')
     @blp.response(403, description='You do not have permission for this operation')
@@ -199,33 +172,32 @@ class ChallengeCRUD(MethodView):
     @blp.response(500, description='Internal server error.')
     def delete(self, data):
         try:
-            data = TitleChallengeSchema().load(data) 
-            challenge = db.session.get(Challenge, data.get("title"))
-            if challenge is not None:
-                db.session.delete(challenge)
+            data = TitleRoleSchema().load(data) 
+            role = db.session.get(Role, data.get("title"))
+            if role is not None:
+                db.session.delete(role)
                 db.session.commit()
                 return Response(status=204)
             else:
-                abort(404, message='Title not found.')
+                abort(404, message='Role not found.')
 
         except ValidationError as error:
             traceback.print_exc()
             abort(400, message=str(error))
 
         except NotFound as error:
-            abort(404, message='Title not found.')
+            abort(404, message='Role not found.')
 
         except Exception as error:
             traceback.print_exc()
             db.session.rollback()
             abort(500, message='Internal server error.')
 
-
 @blp.route('icon')
-class ChallengeImg(MethodView):
-    """Handles challenge icon upload and retrieval."""
+class RoleImg(MethodView):
+    """Handles role icon upload and retrieval."""
     @blp.doc(
-        summary="Upload or update your challenge pic",
+        summary="Upload or update your role pic",
         consumes=["multipart/form-data"],
         requestBody={
             "required": True,
@@ -237,7 +209,7 @@ class ChallengeImg(MethodView):
                             "icon": {
                                 "type": "string",
                                 "format": "binary",
-                                "description": f"Challenge pic file {str(ALLOWED_PICTURE_EXTENSIONS)}"
+                                "description": f"Role pic file {str(ALLOWED_PICTURE_EXTENSIONS)}"
                             }
                         },
                         "required": ["icon"]
@@ -247,8 +219,8 @@ class ChallengeImg(MethodView):
         }
     )
     @admin_required
-    @blp.arguments(TitleChallengeSchema, location='query')
-    @blp.response(200, ChallengeSchema, description='Challenge updated.')
+    @blp.arguments(TitleRoleSchema, location='query')
+    @blp.response(200, RoleSchema, description='Role updated.')
     @blp.response(400, description='Bad request')
     @blp.response(401, description='Invalid token')
     @blp.response(403, description='You do not have permission for this operation')
@@ -263,18 +235,18 @@ class ChallengeImg(MethodView):
             if not allowfilename(newfilename):
                 abort(400, message='Picture.')
 
-            querydata = TitleChallengeSchema().load(querydata) 
-            challenge = Challenge.query.get(querydata.get("title"))
-            if challenge is not None:
-                upload_dir = current_app.config.get('CHALLENGE_PICTURES_DIR', CHALLENGE_PICTURES_DIR)
+            querydata = TitleRoleSchema().load(querydata) 
+            role:Role = Role.query.get(querydata.get("title"))
+            if role is not None:
+                upload_dir = current_app.config.get('ROLE_PICTURES_DIR', ROLE_PICTURES_DIR)
                 os.makedirs(upload_dir, exist_ok=True)
                 save_path = os.path.join(upload_dir, newfilename)
                 picture.save(save_path)
-                challenge.icon = newfilename
+                role.icon = newfilename
                 db.session.commit()
-                return jsonify(challenge.to_dict()) 
+                return jsonify(role.to_dict()) 
             else:
-                abort(404, message='Title not found.')
+                abort(404, message='Role not found.')
         
         except ValidationError as error:
             traceback.print_exc()
@@ -285,47 +257,46 @@ class ChallengeImg(MethodView):
             abort(400, message='Picture needed.')
 
         except NotFound as error:
-            abort(404, message='Title not found.')
+            abort(404, message='Role not found.')
 
         except Exception as error:
             traceback.print_exc()
             db.session.rollback()
             abort(500, message='Internal server error.')
 
-    
     @login_required
-    @blp.arguments(TitleChallengeSchema, location='query')
+    @blp.arguments(TitleRoleSchema, location='query')
     @blp.response(200, description='Icon found.')
     @blp.response(204, description='Icon not found.')
     @blp.response(400, description='Bad request')
     @blp.response(401, description='Invalid token')
     @blp.response(403, description='You do not have permission for this operation')
-    @blp.response(404, description='Challenge not found.')
+    @blp.response(404, description='Role not found.')
     @blp.response(500, description='Internal server error.')
     def get(self, data):
         try: 
-            data = GetChallengeSchema().load(data)
+            data = GetRoleSchema().load(data)
             getTitle = data.get('title')
             if getTitle is None :
                 abort(400, message='Title is required.')
-            challenge = Challenge.query.get(getTitle)
-            if challenge is None:
-                abort(404, message='Challenge not found.')
-            if challenge.icon is None:
-                return Response(status=204)  # No content if no icon is set
+            role:Role = Role.query.get(getTitle)
+            if role is None:
+                abort(404, message='Role not found.')
+            if role.icon is None:
+                return Response(status=204)
             else:
-                upload_dir = current_app.config.get('CHALLENGE_PICTURES_DIR', CHALLENGE_PICTURES_DIR)
-                icon_path = os.path.join(upload_dir, challenge.icon)
+                upload_dir = current_app.config.get('ROLE_PICTURES_DIR', ROLE_PICTURES_DIR)
+                icon_path = os.path.join(upload_dir, role.icon)
                 if not os.path.exists(icon_path):
                     abort(404, message='Icon file not found.')
-                return send_from_directory(upload_dir, challenge.icon, as_attachment=False)
+                return send_from_directory(upload_dir, role.icon, as_attachment=False)
                 
         except ValidationError as error:
             traceback.print_exc()
             abort(400, message=str(error))
 
         except NotFound as error:
-            abort(404, message='Challenge not found.')
+            abort(404, message='Role not found.')
         
         except Exception as error:
             traceback.print_exc()

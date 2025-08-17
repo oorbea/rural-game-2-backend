@@ -6,6 +6,7 @@ class RoleDict(TypedDict):
     description: str
     quantity_per_game: int|None = None
     priority: Literal[1, 2, 3, 4, 5]
+    icon: str|None = None
 
 class Role(db.Model):
     __tablename__ = 'roles'
@@ -17,6 +18,7 @@ class Role(db.Model):
     description = db.Column(db.String(500), nullable=False)
     quantity_per_game = db.Column(db.Integer, nullable=True, default=None)
     priority = db.Column(db.Integer, nullable=False, default=1)
+    icon = db.Column(db.String(100), nullable=True, default=None)
 
     def __repr__(self):
         return f"<Role {self.title}>"
@@ -26,7 +28,8 @@ class Role(db.Model):
             title=self.title,
             description=self.description,
             quantity_per_game=self.quantity_per_game,
-            priority=self.priority
+            priority=self.priority,
+            icon=self.icon
         )
 
     def __len__(self) -> int:

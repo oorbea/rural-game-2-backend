@@ -43,7 +43,7 @@ class UserPicture(MethodView):
         abs_from_rel = os.path.join(app_root, rel_path.lstrip("/"))
         abs_path = rel_path if os.path.isabs(rel_path) else abs_from_rel
 
-        pictures_root = os.path.abspath(os.path.join(app_root, "public", "ProfilePictures"))
+        pictures_root = os.path.abspath(os.path.join(app_root, current_app.config.get('PROFILE_PICTURES_DIR', 'public/ProfilePictures')))
         abs_path = os.path.abspath(abs_path)
         if not (abs_path == pictures_root or abs_path.startswith(pictures_root + os.sep)):
             abort(404, message="Profile picture file not found.")

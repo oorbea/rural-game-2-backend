@@ -51,12 +51,6 @@ class SecretMissionSchema(Schema):
     prize = fields.Integer(required=True)
     punishment = fields.Float(required=True)
 
-class RoleSchema(Schema):
-    """Schema for validating role data."""
-    title = fields.String(required=True, validate=validate.Length(min=1, max=100))
-    description = fields.String(required=True, validate=validate.Length(min=1, max=500))
-    quantity_per_game = fields.Integer(required=False, allow_none=True, load_default=None)
-
 class PlayerInfoSchema(Schema):
     """Schema for validating player info."""
     username = fields.String(required=True)
@@ -88,3 +82,23 @@ class UpdatePlayerSchema(Schema):
     virgin = fields.Boolean(required=False)
     gender = fields.String(required=False, validate=validate.OneOf([member.value for member in GenderEnum]))
     profile_pic = fields.String(required=False, allow_none=True, load_default=None)
+
+class RoleSchema(Schema):
+    """Schema for validating role data."""
+    title = fields.String(required=True, validate=validate.Length(min=1, max=100))
+    description = fields.String(required=True, validate=validate.Length(min=1, max=500))
+    quantity_per_game = fields.Integer(required=False, allow_none=True)
+    priority = fields.Integer(required=True, validate=validate.Range(min=1, max=5))
+
+class GetRoleSchema(Schema):
+    """Schema for validating role data."""
+    class Meta:
+        unknown = RAISE
+    title = fields.String(required=False, validate=validate.Length(min=1, max=100))
+    description = fields.String(required=False, validate=validate.Length(min=1, max=500))
+    quantity_per_game = fields.Integer(required=False, allow_none=True, load_default=None)
+    priority = fields.Integer(required=False, validate=validate.Range(min=1, max=5))
+
+class TitleRoleSchema(Schema):
+    """Schema for validating role data."""
+    title = fields.String(required=True, validate=validate.Length(min=1, max=100))

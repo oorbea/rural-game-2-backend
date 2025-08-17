@@ -15,6 +15,7 @@ from resources.MainPage import blp as MainPageBlueprint
 from resources.socket_docs import blp as SocketDocsBlueprint
 from resources.Challenge import blp as ChallengeBlueprint
 from resources.UserPicture import blp as UserPictureBlueprint
+from resources.Role import blp as RoleBlueprint
 
 from events.LobbyEvents import LobbyEvents
 
@@ -93,6 +94,7 @@ def create_app(settings_module: str | None = None):
     api.register_blueprint(SocketDocsBlueprint, url_prefix=getApiPrefix('docs'))
     api.register_blueprint(ChallengeBlueprint, url_prefix=getApiPrefix('challenge'))
     api.register_blueprint(UserPictureBlueprint, url_prefix=getApiPrefix(''))
+    api.register_blueprint(RoleBlueprint, url_prefix=getApiPrefix('role'))
 
     # SocketIO events
     socketio.on_namespace(LobbyEvents(getSocketIOPrefix('lobby')))

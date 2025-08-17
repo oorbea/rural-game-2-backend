@@ -23,6 +23,7 @@ def upgrade():
     sa.Column('description', sa.String(length=500), nullable=False),
     sa.Column('quantity_per_game', sa.Integer(), nullable=True),
     sa.Column('priority', sa.Integer(), nullable=False),
+    sa.Column('icon', sa.String(length=100), nullable=True, default=None),
     sa.PrimaryKeyConstraint('title')
     )
     # ### end Alembic commands ###

@@ -266,7 +266,7 @@ class LobbyEvents(Namespace):
                 return {'ok': False, 'error': 'Invalid base64 image.'}
 
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        pictures_dir = os.path.join(base_dir, 'public', 'ProfilePictures')
+        pictures_dir = os.path.join(base_dir, current_app.config.get('PROFILE_PICTURES_DIR', 'public/ProfilePictures'))
         os.makedirs(pictures_dir, exist_ok=True)
 
         user_key = gc.USER_INFO_TEMPLATE.format(username=username)
