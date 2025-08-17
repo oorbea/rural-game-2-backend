@@ -17,9 +17,10 @@ class LobbyEvents(Namespace):
         api_prefix = current_app.config.get('API_PREFIX', '/api/v1')
         return f"{host}{api_prefix}/lobby/{code}/user/{player_name}/profile-picture"
     
-    def _profile_pic_url(self, code:str, player_name: str):
-        return f"{self.__profile_pic_url(code, player_name)}?t={int(time.time())}"
-
+    def _profile_pic_url(self, code: str, player_name: str) -> str:
+        """Generate a profile picture URL with cache-busting."""
+        url = self.__profile_pic_url(code, player_name)
+        return f"{url}?t={int(time.time())}"
         
     def on_create_lobby(self, data: dict):
         try:
@@ -215,46 +216,58 @@ class LobbyEvents(Namespace):
             return {'ok': False, 'error': 'Lobby code and player_name are required.'}
 
         remove_only = bool(data.get('remove', False))
-        data_url = data.get('data_url')
-        image_b64 = data.get('image_base64')
+
+        raw_b64_or_dataurl:str = data.get('image_base64') or data.get('data_url')
         ext = (data.get('extension') or '').lower()
         filename_hint = data.get('filename')
 
-        if not remove_only and not (data_url or image_b64):
-            return {'ok': False, 'error': 'Provide data_url or image_base64 (or set remove=true).'}
+        if not remove_only and not raw_b64_or_dataurl:
+            return {'ok': False, 'error': 'Provide image_base64 or data_url or set remove=true.'}
 
-        if data_url:
-            m = re.match(r'^data:image/([a-zA-Z0-9]+);base64,(.+)$', data_url)
-            if not m:
-                return {'ok': False, 'error': 'Invalid data_url.'}
-            ext = m.group(1).lower()
-            image_b64 = m.group(2)
+        gc: GameController = current_app.extensions['game_controller']
+        r = gc.redis
+        if not r.sismember(gc.ACTIVE_LOBBIES_SET, code):
+            return {'ok': False, 'error': 'Lobby not found or inactive.'}
+        if username not in r.lrange(gc.PLAYERS_LIST_TEMPLATE.format(code=code), 0, -1):
+            return {'ok': False, 'error': 'Player not in this lobby.'}
 
-        if not ext and filename_hint and isinstance(filename_hint, str) and '.' in filename_hint:
-            ext = filename_hint.rsplit('.', 1)[-1].lower()
-
-        allowed = set(current_app.config.get('ALLOWED_PICTURE_EXTENSIONS', {'png', 'jpg', 'jpeg', 'gif'}))
+        content_b64 = None
         image_bytes = None
         if not remove_only:
+            header = None
+            s = raw_b64_or_dataurl.strip()
+
+            if ',' in s:
+                header, content_b64 = s.split(',', 1)
+                header = header.strip()
+                m = re.match(r'^data:(?P<mime>[^;]+);base64$', header, flags=re.IGNORECASE)
+                if m:
+                    mime = m.group('mime').lower()
+                    if '/' in mime:
+                        maybe_ext = mime.rsplit('/', 1)[-1]
+                        if not ext:
+                            ext = maybe_ext
+            else:
+                content_b64 = s
+
+            if not ext and filename_hint and isinstance(filename_hint, str) and '.' in filename_hint:
+                ext = filename_hint.rsplit('.', 1)[-1].lower()
+
+            if not ext:
+                return {'ok': False, 'error': 'Cannot infer image extension. Provide "extension", or "filename", or use a data URL header.'}
+
+            allowed = set(current_app.config.get('ALLOWED_PICTURE_EXTENSIONS', {'png', 'jpg', 'jpeg', 'gif'}))
             if ext not in allowed:
-                return {'ok': False, 'error': f'Unsupported image extension: {ext}'}
+                return {'ok': False, 'error': f'Unsupported image extension: {ext}, allowed: {", ".join(allowed)}.'}
+
             try:
-                image_bytes = base64.b64decode(image_b64, validate=True)
+                image_bytes = base64.b64decode(content_b64, validate=True)
             except Exception:
                 return {'ok': False, 'error': 'Invalid base64 image.'}
 
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         pictures_dir = os.path.join(base_dir, 'public', 'ProfilePictures')
         os.makedirs(pictures_dir, exist_ok=True)
-
-        gc: GameController = current_app.extensions['game_controller']
-        r = gc.redis
-
-        if not r.sismember(gc.ACTIVE_LOBBIES_SET, code):
-            return {'ok': False, 'error': 'Lobby not found or inactive.'}
-        players = r.lrange(gc.PLAYERS_LIST_TEMPLATE.format(code=code), 0, -1)
-        if username not in players:
-            return {'ok': False, 'error': 'Player not in this lobby.'}
 
         user_key = gc.USER_INFO_TEMPLATE.format(username=username)
         old_path = r.hget(user_key, 'profile_pic')
@@ -297,10 +310,9 @@ class LobbyEvents(Namespace):
                 if old_fs and os.path.exists(old_fs):
                     os.remove(old_fs)
             except Exception:
-                print(f"Warning: Failed to remove old profile picture {old_path}")
+                pass
 
         url = self._profile_pic_url(code, username)
         payload = {'player': username, 'profile_picture_url': url, 'removed': remove_only}
         self.emit('profile_picture_updated', payload, room=code, include_self=False)
         return {'ok': True, **payload}
-
