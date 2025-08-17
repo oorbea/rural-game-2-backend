@@ -283,6 +283,11 @@ class GameController:
                 lobby_meta["current_turn"] = int(lobby_meta["current_turn"])
             except (TypeError, ValueError):
                 pass
+        if "active" in lobby_meta:
+            try:
+                lobby_meta["active"] = bool(lobby_meta["active"])
+            except (TypeError, ValueError):
+                pass
         player_names = self.redis.lrange(players_list_key, 0, -1)
         players_state: dict[str, Any] = {}
         for name in player_names:
@@ -302,6 +307,7 @@ class GameController:
             else:
                 try:
                     connected = json.loads(connected_str)
+                    connected = bool(connected)
                 except json.JSONDecodeError:
                     connected = bool(connected_str)
             players_state[name] = {
