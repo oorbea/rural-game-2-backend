@@ -456,9 +456,22 @@ components:
     UpdateProfilePicturePayload:
       type: object
       description: |
-        Update or remove a player's profile picture. To remove the picture, set `remove: true`.
-        To upload/replace, send either `data_url` (preferred) or `image_base64` along with
-        `extension` (or infer it from `filename`).
+        Update or remove a player's profile picture.
+
+        To remove:
+          - Set `remove: true`. All other image fields are optional/ignored.
+
+        To upload/replace, provide EXACTLY ONE of the following inputs:
+          1) `image_base64` (raw base64 content) + `extension`
+          2) `image_base64` (raw base64 content) + `filename` (the file extension is inferred)
+          3) `data_url` formatted as `data:image/<ext>;base64,<content>` (the file extension is inferred)
+
+        Notes:
+          - Supported extensions are typically: png, jpg, jpeg, gif (configurable on the server).
+          - Do not send both `data_url` and `image_base64` at the same time.
+          - The server stores a relative file path in Redis but responds/announces a cache-busted URL for clients.
+          - When replacing a picture, the previous file on disk is removed.
+
       required:
         - code
         - player_name
