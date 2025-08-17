@@ -88,22 +88,6 @@ def create_app(settings_module: str | None = None):
 
     socketio.init_app(app, cors_allowed_origins='*')
 
-    r = redis.Redis(host="redis", port=6379, decode_responses=True)
-    turn_module_name = app.config.get('CHALLENGE_PROVIDER_MODULE', 'controllers.TurnManager')
-    player_module_name = app.config.get('PLAYER_MANAGER_MODULE', 'controllers.PlayerManager')
-    try:
-        turn_module = import_module(turn_module_name)
-        player_module = import_module(player_module_name)
-        turn_manager = turn_module.TurnManager()
-        player_manager = player_module.PlayerManager(r)
-        app.extensions['game_controller'] = GameController(r, turn_manager, player_manager)
-    except ImportError as e:
-        raise ImportError(f"Could not import module '{turn_module_name}' or '{player_module_name}': {e}")
-    except AttributeError as e:
-        raise AttributeError(f"Module '{turn_module_name}' or '{player_module_name}' does not have the required class: {e}")
-    except Exception as e:
-        raise Exception(f"An error occurred while initializing the game controller: {e}")
-
     # HTTP routes
     api.register_blueprint(MainPageBlueprint, url_prefix=getApiPrefix(''))
     api.register_blueprint(SocketDocsBlueprint, url_prefix=getApiPrefix('docs'))
@@ -121,6 +105,22 @@ def create_app(settings_module: str | None = None):
         migrations_dir = os.path.join(os.path.dirname(__file__), "migrations")
         if DB_AUTO_MIGRATE and os.path.isdir(migrations_dir) and os.path.isfile(os.path.join(migrations_dir, "env.py")):
             alembic_upgrade()
+        
+        r = redis.Redis(host="redis", port=6379, decode_responses=True)
+        turn_module_name = app.config.get('CHALLENGE_PROVIDER_MODULE', 'controllers.TurnManager')
+        player_module_name = app.config.get('PLAYER_MANAGER_MODULE', 'controllers.PlayerManager')
+        try:
+            turn_module = import_module(turn_module_name)
+            player_module = import_module(player_module_name)
+            turn_manager = turn_module.TurnManager()
+            player_manager = player_module.PlayerManager(r)
+            app.extensions['game_controller'] = GameController(r, turn_manager, player_manager)
+        except ImportError as e:
+            raise ImportError(f"Could not import module '{turn_module_name}' or '{player_module_name}': {e}")
+        except AttributeError as e:
+            raise AttributeError(f"Module '{turn_module_name}' or '{player_module_name}' does not have the required class: {e}")
+        except Exception as e:
+            raise Exception(f"An error occurred while initializing the game controller: {e}")
     
     ## NotImplementedError
     @app.errorhandler(NotImplementedError)

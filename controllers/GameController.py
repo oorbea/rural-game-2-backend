@@ -171,8 +171,8 @@ class GameController:
             raise ValueError(f"Lobby {code} does not exist")
         players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
         existing_players:list[str] = self.redis.lrange(players_list_key, 0, -1)
-        if not existing_players:
-            raise ValueError(f"Cannot start game; lobby {code} has no players")
+        if not existing_players or len(existing_players) < 2:
+            raise ValueError(f"Cannot start game; lobby {code} has less than 2 players")
         host = self.redis.hget(lobby_key, "host")
         if host != player:
             raise ValueError(f"Only the host ({host}) can start the game")
