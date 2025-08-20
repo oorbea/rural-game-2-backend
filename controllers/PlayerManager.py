@@ -9,11 +9,10 @@ from helpers.PlayerState import PlayerState
 from helpers.normalize_value import normalize_value
 
 class PlayerManager(IPlayerManager):
-    """Concrete implementation of PlayerManager interface."""
     LOBBY_KEY_TEMPLATE = "lobby:{code}"
     PLAYERS_LIST_TEMPLATE = "lobby:{code}:players"
     PLAYER_STATE_TEMPLATE = "lobby:{code}:player:{username}"
-    USER_INFO_TEMPLATE = "user:{username}"
+    LOBBY_USER_TEMPLATE = "lobby:{code}:user:{username}"
     ACTIVE_LOBBIES_SET = "lobbies:active"
 
     def __init__(self, redis_client: redis.Redis) -> None:
@@ -23,25 +22,9 @@ class PlayerManager(IPlayerManager):
     def _resolve_fs(self, path: str | None) -> str | None:
         if not path:
             return None
-        if os.path.isabs(path):
-            return path
-        return os.path.join(self._base_dir, path.lstrip('/'))
+        return path if os.path.isabs(path) else os.path.join(self._base_dir, path.lstrip('/'))
 
     def update_player_info(self, code: str, current_username: str, new_info: dict[str, Any]) -> None:
-        """Update a player's static information in the lobby.
-
-        Supports partial updates. If 'username' is provided and differs from the
-        current one, this will atomically:
-        - replace the username in the lobby's ordered players list,
-        - rename the player's dynamic state key,
-        - update the lobby host if the host was the renamed player,
-        - move/rename the user info key.
-        Other fields are updated in the user's static info hash.
-
-        :param code: lobby code
-        :param current_username: the player's current username
-        :param new_info: partial PlayerInfo fields to update
-        """
         if not self.redis.sismember(self.ACTIVE_LOBBIES_SET, code):
             raise ValueError(f"Lobby {code} does not exist or is not active")
 
@@ -52,13 +35,9 @@ class PlayerManager(IPlayerManager):
             g = updates_raw["gender"]
             try:
                 from enums.GenderEnum import GenderEnum
-                if isinstance(g, GenderEnum):
-                    updates_raw["gender"] = g  # _normalize_value will store .value
-                else:
-                    gs = str(g).lower()
-                    if gs not in ("male", "female"):
-                        raise ValueError("gender must be 'male' or 'female'")
-                    updates_raw["gender"] = GenderEnum(gs)
+                if not isinstance(g, GenderEnum):
+                    g = GenderEnum(str(g).lower())
+                updates_raw["gender"] = g
             except Exception:
                 gs = str(g).lower()
                 if gs not in ("male", "female"):
@@ -67,120 +46,103 @@ class PlayerManager(IPlayerManager):
 
         lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
         players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
-        user_key_old = self.USER_INFO_TEMPLATE.format(username=current_username)
         state_key_old = self.PLAYER_STATE_TEMPLATE.format(code=code, username=current_username)
+        lobby_user_old = self.LOBBY_USER_TEMPLATE.format(code=code, username=current_username)
 
         desired_username = updates_raw.get("username", current_username)
-        user_key_new = self.USER_INFO_TEMPLATE.format(username=desired_username)
         state_key_new = self.PLAYER_STATE_TEMPLATE.format(code=code, username=desired_username)
+        lobby_user_new = self.LOBBY_USER_TEMPLATE.format(code=code, username=desired_username)
 
-        def _b2s(x):
-            return x.decode() if isinstance(x, (bytes, bytearray)) else x
+        def _b2s(x): return x.decode() if isinstance(x, (bytes, bytearray)) else x
 
         with self.redis.pipeline() as pipe:
             while True:
                 try:
-                    watch_keys = [players_list_key, lobby_key]
+                    watch_keys = [players_list_key, lobby_key, lobby_user_old]
                     if desired_username != current_username:
-                        watch_keys += [state_key_old, user_key_old]
+                        watch_keys += [state_key_old]
                     pipe.watch(*watch_keys)
 
-                    players = pipe.lrange(players_list_key, 0, -1)
-                    players = [_b2s(p) for p in players]
+                    players = [_b2s(p) for p in pipe.lrange(players_list_key, 0, -1)]
                     if current_username not in players:
                         pipe.unwatch()
                         raise ValueError(f"Player '{current_username}' is not in lobby {code}")
 
-                    host_raw = pipe.hget(lobby_key, "host")
-                    host_val = _b2s(host_raw)
+                    host_val = _b2s(pipe.hget(lobby_key, "host"))
 
                     idx = -1
                     if desired_username != current_username:
                         if desired_username in players:
                             pipe.unwatch()
                             raise ValueError(f"Username '{desired_username}' is already in the lobby")
-
                         if not pipe.exists(state_key_old):
                             pipe.unwatch()
                             raise ValueError(f"No state for player {current_username} in lobby {code}")
-
                         idx = players.index(current_username)
 
-                    to_update = {k: updates_raw[k] for k in updates_raw if k not in ("username", "profile_pic")}
-                    serial_map = {k: normalize_value(v) for k, v in to_update.items()}
+                    # normalizamos mapping para guardar en la hash por-lobby
+                    to_update = {k: updates_raw[k] for k in updates_raw if k != "username"}
+                    serial_map = {}
+                    for k, v in to_update.items():
+                        if k == "gender" and hasattr(v, "value"):
+                            serial_map[k] = normalize_value(v.value)
+                        else:
+                            serial_map[k] = normalize_value(v)
 
-                    pic_in_payload = "profile_pic" in updates_raw
-                    pic_value = updates_raw.get("profile_pic", None)
-
+                    target_lobby_user = lobby_user_old
                     pipe.multi()
 
                     if desired_username != current_username:
+                        # renombrar lista
                         pipe.lset(players_list_key, idx, desired_username)
-
+                        # renombrar estado
                         pipe.renamenx(state_key_old, state_key_new)
-
-                        pipe.renamenx(user_key_old, user_key_new)
-
+                        # renombrar hash por-lobby
+                        if pipe.exists(lobby_user_old):
+                            pipe.renamenx(lobby_user_old, lobby_user_new)
+                        target_lobby_user = lobby_user_new
+                        # host
                         if host_val == current_username:
                             pipe.hset(lobby_key, "host", desired_username)
 
-                        target_user_key = user_key_new
-                    else:
-                        target_user_key = user_key_old
-
                     if serial_map:
-                        pipe.hset(target_user_key, mapping=serial_map)
-
-                    if pic_in_payload:
-                        if pic_value is None:
-                            pipe.hdel(target_user_key, "profile_pic")
-                        else:
-                            pipe.hset(target_user_key, "profile_pic", normalize_value(pic_value))
+                        pipe.hset(target_lobby_user, mapping=serial_map)
 
                     pipe.execute()
                     break
-                except ValueError as e:
-                    raise e
+                except ValueError:
+                    raise
                 except redis.WatchError:
                     continue
-                
+
     def get_player_info(self, code: str, username: str) -> PlayerInfo:
-        """Retrieve a player's static information in the lobby (profile_pic as file bytes)."""
         if not self.redis.sismember(self.ACTIVE_LOBBIES_SET, code):
             raise ValueError(f"Lobby {code} does not exist or is not active")
 
         players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
-        players: list[str] = self.redis.lrange(players_list_key, 0, -1)
-        if username not in players:
+        players_list:list[str] = self.redis.lrange(players_list_key, 0, -1)
+        if username not in players_list:
             raise ValueError(f"Player '{username}' is not in lobby {code}")
 
-        user_key = self.USER_INFO_TEMPLATE.format(username=username)
-        if not self.redis.exists(user_key):
-            raise ValueError(f"No static info for player '{username}'")
+        lobby_user_key = self.LOBBY_USER_TEMPLATE.format(code=code, username=username)
+        if not self.redis.exists(lobby_user_key):
+            raise ValueError(f"No static info for player '{username}' in lobby {code}")
 
-        data = self.redis.hgetall(user_key)
+        data = self.redis.hgetall(lobby_user_key)
 
         def _as_bool(x):
-            if x is None:
-                return False
-            if isinstance(x, (int, float)):
-                return bool(x)
+            if x is None: return False
+            if isinstance(x, (int, float)): return bool(x)
             s = str(x).strip().lower()
-            if s in ("1", "true", "t", "yes", "y"):
-                return True
-            if s in ("0", "false", "f", "no", "n", ""):
-                return False
+            if s in ("1","true","t","yes","y"): return True
+            if s in ("0","false","f","no","n",""): return False
             try:
                 j = json.loads(s)
-                if isinstance(j, bool):
-                    return j
-                if isinstance(j, (int, float)):
-                    return bool(j)
+                if isinstance(j, bool): return j
+                if isinstance(j, (int, float)): return bool(j)
             except Exception:
                 pass
             return bool(s)
-
-        profile_pic_path = data.get("profile_pic")
 
         gender_raw = data.get("gender")
         if gender_raw is None:
@@ -195,8 +157,9 @@ class PlayerManager(IPlayerManager):
             raise ValueError(f"Invalid gender value '{gender_raw}' for user '{username}'") from e
 
         profile_pic_bytes = None
-        if profile_pic_path:
-            abs_path = self._resolve_fs(profile_pic_path)
+        rel_path = data.get("profile_pic")
+        if rel_path:
+            abs_path = self._resolve_fs(rel_path)
             if abs_path and os.path.exists(abs_path):
                 try:
                     with open(abs_path, 'rb') as f:
@@ -215,120 +178,65 @@ class PlayerManager(IPlayerManager):
         )
 
     def get_player_state(self, code: str, username: str) -> PlayerState:
-        """Retrieve a player's dynamic state in the lobby."""
-        if not self.redis.sismember(self.ACTIVE_LOBBIES_SET, code):
-            raise ValueError(f"Lobby {code} does not exist or is not active")
-
-        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
-        players:list[str] = self.redis.lrange(players_list_key, 0, -1)
-        if username not in players:
-            raise ValueError(f"Player '{username}' is not in lobby {code}")
-
         state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=username)
         if not self.redis.exists(state_key):
             raise ValueError(f"No state for player '{username}' in lobby {code}")
-
         raw = self.redis.hgetall(state_key)
-
         try:
             points = int(raw.get("points", 0))
         except (TypeError, ValueError):
             points = 0
-
-        role = raw.get("role")
-        role = role if role not in (None, "", "null") else None
-
+        role = raw.get("role") or None
         missions_raw = raw.get("secret_missions")
-        missions: list[str]
-        if missions_raw:
-            try:
-                parsed = json.loads(missions_raw)
-                if isinstance(parsed, list):
-                    missions = [str(x) for x in parsed]
-                else:
-                    missions = []
-            except Exception:
-                missions = []
-        else:
-            missions = []
-
+        try:
+            secret_missions = list(json.loads(missions_raw)) if missions_raw else []
+        except Exception:
+            secret_missions = []
         conn_raw = raw.get("connected")
-        def _as_bool(x):
-            if x is None:
-                return True
-            if isinstance(x, (int, float)):
-                return bool(x)
-            s = str(x).strip().lower()
-            if s in ("1", "true", "t", "yes", "y"):
-                return True
-            if s in ("0", "false", "f", "no", "n", ""):
-                return False
+        connected = True
+        if conn_raw is not None:
             try:
-                j = json.loads(s)
-                if isinstance(j, bool):
-                    return j
-                if isinstance(j, (int, float)):
-                    return bool(j)
+                connected = bool(json.loads(conn_raw))
             except Exception:
-                pass
-            return bool(s)
-
-        connected = _as_bool(conn_raw)
-
-        return PlayerState(
-            username=username,
-            points=points,
-            role=role,
-            secret_missions=missions,
-            connected=connected,
-        )
+                connected = bool(conn_raw)
+        return PlayerState(username=username, points=points, role=role, secret_missions=secret_missions, connected=connected)
 
     def remove_player(self, code: str, username: str) -> str | None:
-        """Remove a player from a lobby, delete their profile picture on disk,
-        and return the resulting host (None if lobby deleted)."""
         if not self.redis.sismember(self.ACTIVE_LOBBIES_SET, code):
             raise ValueError(f"Lobby {code} does not exist or is not active")
 
         lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
         players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
         state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=username)
-        user_key = self.USER_INFO_TEMPLATE.format(username=username)
+        lobby_user_key = self.LOBBY_USER_TEMPLATE.format(code=code, username=username)
 
-        def _b2s(x):
-            """Convert bytes to string, if applicable."""
-            return x.decode() if isinstance(x, (bytes, bytearray)) else x
+        def _b2s(x): return x.decode() if isinstance(x, (bytes, bytearray)) else x
 
         old_pic_path: str | None = None
+        result_host: str | None = None
 
         with self.redis.pipeline() as pipe:
             while True:
                 try:
-                    pipe.watch(players_list_key, lobby_key, user_key)
-
-                    players: list[str] = [_b2s(p) for p in pipe.lrange(players_list_key, 0, -1)]
+                    pipe.watch(players_list_key, lobby_key, lobby_user_key)
+                    players = [_b2s(p) for p in pipe.lrange(players_list_key, 0, -1)]
                     if username not in players:
                         pipe.unwatch()
                         host_raw = self.redis.hget(lobby_key, "host")
                         return _b2s(host_raw)
 
-                    host_raw = pipe.hget(lobby_key, "host")
-                    host_val = _b2s(host_raw)
-
-                    old_pic_path = _b2s(pipe.hget(user_key, "profile_pic"))
+                    host_val = _b2s(pipe.hget(lobby_key, "host"))
+                    old_pic_path = _b2s(pipe.hget(lobby_user_key, "profile_pic"))
 
                     remaining = [p for p in players if p != username]
                     new_len = len(remaining)
                     next_host = remaining[0] if new_len > 0 else None
-
-                    if new_len == 0:
-                        result_host = None
-                    else:
-                        result_host = next_host if (not host_val or host_val == username) else host_val
+                    result_host = None if new_len == 0 else (next_host if (not host_val or host_val == username) else host_val)
 
                     pipe.multi()
                     pipe.lrem(players_list_key, 0, username)
                     pipe.delete(state_key)
-                    pipe.hdel(user_key, "profile_pic")
+                    pipe.delete(lobby_user_key)
 
                     if new_len == 0:
                         pipe.delete(players_list_key)
@@ -344,9 +252,9 @@ class PlayerManager(IPlayerManager):
                     continue
 
         try:
-            old_fs = self._resolve_fs(old_pic_path)
-            if old_fs and os.path.exists(old_fs):
-                os.remove(old_fs)
+            abs_old = self._resolve_fs(old_pic_path)
+            if abs_old and os.path.exists(abs_old):
+                os.remove(abs_old)
         except Exception:
             pass
 

@@ -31,16 +31,13 @@ class UserPicture(MethodView):
         if username not in r.lrange(players_key, 0, -1):
             abort(404, message="Player not in this lobby.")
 
-        user_key = gc.USER_INFO_TEMPLATE.format(username=username)
-        if not r.exists(user_key):
-            abort(404, message="User not found.")
-
-        rel_path = r.hget(user_key, "profile_pic")
+        lobby_user_key = gc.player_manager.LOBBY_USER_TEMPLATE.format(code=code, username=username)
+        rel_path = r.hget(lobby_user_key, "profile_pic")
         if not rel_path:
             return Response(status=204)
 
         app_root = current_app.root_path
-        abs_from_rel = os.path.join(app_root, rel_path.lstrip("/"))
+        abs_from_rel = os.path.join(app_root, rel_path.strip('/'))
         abs_path = rel_path if os.path.isabs(rel_path) else abs_from_rel
 
         pictures_root = os.path.abspath(os.path.join(app_root, current_app.config.get('PROFILE_PICTURES_DIR', 'public/ProfilePictures')))

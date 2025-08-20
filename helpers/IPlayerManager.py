@@ -1,11 +1,33 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, ClassVar
 
 from helpers.PlayerInfo import PlayerInfo
 from helpers.PlayerState import PlayerState
 
 class PlayerManager(ABC):
     """Interface for managing player information and state in a game lobby."""
+    LOBBY_KEY_TEMPLATE: ClassVar[str]
+    PLAYERS_LIST_TEMPLATE: ClassVar[str]
+    PLAYER_STATE_TEMPLATE: ClassVar[str]
+    LOBBY_USER_TEMPLATE: ClassVar[str]
+    ACTIVE_LOBBIES_SET: ClassVar[str]
+
+    REQUIRED_CLASS_ATTRS: ClassVar[tuple[str, ...]] = (
+        "LOBBY_KEY_TEMPLATE",
+        "PLAYERS_LIST_TEMPLATE",
+        "PLAYER_STATE_TEMPLATE",
+        "LOBBY_USER_TEMPLATE",
+        "ACTIVE_LOBBIES_SET",
+    )
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        missing = [a for a in cls.REQUIRED_CLASS_ATTRS if not hasattr(cls, a)]
+        if missing:
+            raise TypeError(
+                f"{cls.__name__} must define attributes in: {', '.join(missing)}"
+            )
+
     @abstractmethod
     def update_player_info(self, code: str, current_username: str, new_info: dict[str, Any]) -> None:
         """Update a player's static information in the lobby.

@@ -208,7 +208,7 @@ class LobbyEvents(Namespace):
             return {'ok': False, 'error': f'An error occurred while retrieving user information.\n{str(e)}'}
 
     def on_update_profile_picture(self, data: dict):
-        """Update the profile picture of a player in the lobby."""
+        """Update the profile picture of a player in the lobby (per-lobby)."""
         try:
             code = data['code'] = str(data['code'])
             username = data['player_name']
@@ -217,7 +217,7 @@ class LobbyEvents(Namespace):
 
         remove_only = bool(data.get('remove', False))
 
-        raw_b64_or_dataurl:str = data.get('image_base64') or data.get('data_url')
+        raw_b64_or_dataurl: str | None = data.get('image_base64') or data.get('data_url')
         ext = (data.get('extension') or '').lower()
         filename_hint = data.get('filename')
 
@@ -234,19 +234,14 @@ class LobbyEvents(Namespace):
         content_b64 = None
         image_bytes = None
         if not remove_only:
-            header = None
             s = raw_b64_or_dataurl.strip()
-
             if ',' in s:
                 header, content_b64 = s.split(',', 1)
-                header = header.strip()
-                m = re.match(r'^data:(?P<mime>[^;]+);base64$', header, flags=re.IGNORECASE)
-                if m:
+                m = re.match(r'^data:(?P<mime>[^;]+);base64$', header.strip(), flags=re.IGNORECASE)
+                if m and not ext:
                     mime = m.group('mime').lower()
                     if '/' in mime:
-                        maybe_ext = mime.rsplit('/', 1)[-1]
-                        if not ext:
-                            ext = maybe_ext
+                        ext = mime.rsplit('/', 1)[-1]
             else:
                 content_b64 = s
 
@@ -269,8 +264,8 @@ class LobbyEvents(Namespace):
         pictures_dir = os.path.join(base_dir, current_app.config.get('PROFILE_PICTURES_DIR', 'public/ProfilePictures'))
         os.makedirs(pictures_dir, exist_ok=True)
 
-        user_key = gc.USER_INFO_TEMPLATE.format(username=username)
-        old_path = r.hget(user_key, 'profile_pic')
+        lobby_user_key = gc.player_manager.LOBBY_USER_TEMPLATE.format(code=code, username=username)
+        old_path = r.hget(lobby_user_key, 'profile_pic')
 
         def resolve_fs(path: str | None) -> str | None:
             if not path:

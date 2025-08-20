@@ -5,6 +5,7 @@ This module provides a high-level controller for managing multi-player turn-base
 from __future__ import annotations
 
 import json
+import os
 import random
 import string
 
@@ -27,7 +28,7 @@ class GameController:
     LOBBY_KEY_TEMPLATE = "lobby:{code}"
     PLAYERS_LIST_TEMPLATE = "lobby:{code}:players"
     PLAYER_STATE_TEMPLATE = "lobby:{code}:player:{username}"
-    USER_INFO_TEMPLATE = "user:{username}"
+    LOBBY_USER_TEMPLATE = "lobby:{code}:user:{username}"
     ACTIVE_LOBBIES_SET = "lobbies:active"
 
     def __init__(self, redis_client: redis.Redis, challenge_provider: ChallengeProvider, player_manager: PlayerManager) -> None:
@@ -39,13 +40,6 @@ class GameController:
     # Lobby management
     # ------------------------------------------------------------------
     def create_lobby(self, host: PlayerInfo) -> str:
-        """Create a new lobby and register the host as the first player.
-
-        A unique 4-digit lobby code is generated and stored in a Redis set so that codes are not reused while active. The host's static information is stored under their user key and their initial game state is stored under the lobby.
-
-        :param host: information about the player creating the lobby
-        :returns: the 4-digit lobby code
-        """
         code = self._generate_unique_code()
         lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
         players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
@@ -60,25 +54,19 @@ class GameController:
         self.redis.sadd(self.ACTIVE_LOBBIES_SET, code)
 
         self.redis.rpush(players_list_key, host.username)
-        self._persist_user_info(host)
+        self._persist_lobby_user_info(code, host)  # <- per-lobby
         self._persist_player_state(code, PlayerState(username=host.username))
         return code
 
     def join_lobby(self, code: str, player: PlayerInfo) -> None:
-        """Join an existing lobby.
-
-        If the lobby is active, the player is appended to the ordered list of participants. Their static information is stored (or updated) under their user key and their dynamic lobby state is initialised. Attempting to join a non-existent or inactive lobby will raise a ValueError.
-
-        :param code: lobby code
-        :param player: static player information
-        """
         if not self.redis.sismember(self.ACTIVE_LOBBIES_SET, code):
             raise ValueError(f"Lobby {code} does not exist or is not active")
         players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
-        existing_players:list[str] = self.redis.lrange(players_list_key, 0, -1)
+        existing_players: list[str] = self.redis.lrange(players_list_key, 0, -1)
         if player.username in existing_players:
             raise ValueError(f"Player '{player.username}' already in lobby")
-        self._persist_user_info(player)
+
+        self._persist_lobby_user_info(code, player)  # <- per-lobby
         self._persist_player_state(code, PlayerState(username=player.username))
         self.redis.rpush(players_list_key, player.username)
 
@@ -141,20 +129,33 @@ class GameController:
 
 
     def end_lobby(self, code: str) -> None:
-        """Clean up all data associated with a lobby.
-
-        The lobby metadata, players list and per-player states are removed. The lobby code is released so that it may be reused for future games.
-
-        :param code: lobby code to remove
-        """
+        """Borra también las entradas per-lobby y sus fotos."""
         self.redis.srem(self.ACTIVE_LOBBIES_SET, code)
         lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
         players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
         player_names = self.redis.lrange(players_list_key, 0, -1)
-        self.redis.delete(lobby_key)
+
+        # borrar estados y datos per-lobby (incluye profile_pic en disco)
         for name in player_names:
+            # estado dinámico
             state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=name)
             self.redis.delete(state_key)
+
+            # datos per-lobby + foto
+            lobby_user_key = self.LOBBY_USER_TEMPLATE.format(code=code, username=name)
+            rel_path = self.redis.hget(lobby_user_key, "profile_pic")
+            self.redis.delete(lobby_user_key)
+            # intentar borrar el archivo
+            try:
+                if rel_path:
+                    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+                    abs_path = rel_path if os.path.isabs(rel_path) else os.path.join(base_dir, rel_path.lstrip('/'))
+                    if os.path.exists(abs_path):
+                        os.remove(abs_path)
+            except Exception:
+                pass
+
+        self.redis.delete(lobby_key)
         self.redis.delete(players_list_key)
 
     # ------------------------------------------------------------------
@@ -393,26 +394,6 @@ class GameController:
             attempts += 1
         raise RuntimeError("Unable to generate unique lobby code; too many active lobbies")
 
-    def _persist_user_info(self, info: PlayerInfo) -> None:
-        """Persist static user information under a Redis key.
-
-        This method stores per-user attributes independently from
-        lobby state so that reconnections or participation in
-        multiple games reuse the same data.  Existing fields will
-        be updated; unspecified fields are left untouched.
-        """
-        user_key = self.USER_INFO_TEMPLATE.format(username=info.username)
-        update_data = {
-            "drinking": info.drinking,
-            "smoking": info.smoking,
-            "partnered": info.partnered,
-            "virgin": info.virgin,
-            "gender": info.gender
-        }
-        if info.profile_pic is not None:
-            update_data["profile_pic"] = info.profile_pic
-        self._hset_serialized(user_key, mapping=update_data)
-
     def _persist_player_state(self, code: str, state: PlayerState) -> None:
         """Persist the dynamic state of a player within a lobby.
 
@@ -426,6 +407,22 @@ class GameController:
             "connected": state.connected,
         }
         self._hset_serialized(state_key, mapping=mapping)
+
+    def _persist_lobby_user_info(self, code: str, info: PlayerInfo) -> None:
+        """Stores static player info per-lobby."""
+        lobby_user_key = self.LOBBY_USER_TEMPLATE.format(code=code, username=info.username)
+        gender_value = info.gender.value if hasattr(info.gender, "value") else info.gender
+        mapping = {
+            "username": info.username,
+            "drinking": info.drinking,
+            "smoking": info.smoking,
+            "partnered": info.partnered,
+            "virgin": info.virgin,
+            "gender": gender_value,
+        }
+        if isinstance(info.profile_pic, str) and info.profile_pic:
+            mapping["profile_pic"] = info.profile_pic
+        self._hset_serialized(lobby_user_key, mapping=mapping)
 
     def _hset_serialized(
         self,
