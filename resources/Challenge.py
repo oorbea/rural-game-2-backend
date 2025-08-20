@@ -237,7 +237,7 @@ class ChallengeImg(MethodView):
                             "icon": {
                                 "type": "string",
                                 "format": "binary",
-                                "description": f"Challenge pic file {str(ALLOWED_PICTURE_EXTENSIONS)}"
+                                "description": f"Challenge pic file {str(ALLOWED_PICTURE_EXTENSIONS)}. If not provided, deletes the current icon."
                             }
                         },
                         "required": ["icon"]
@@ -256,25 +256,40 @@ class ChallengeImg(MethodView):
     @blp.response(500, description='Internal server error.')
     def patch(self, querydata):
         try:
-
+            querydata = TitleChallengeSchema().load(querydata)
+            challenge:Challenge = Challenge.query.get(querydata.get("title"))
             picture = request.files["icon"]
-            originalfilename = picture.filename.replace(" ", "_")
-            newfilename = secure_filename(f"{str(datetime.datetime.now()).replace(" ", "_")}_{originalfilename}") 
-            if not allowfilename(newfilename):
-                abort(400, message='Picture.')
-
-            querydata = TitleChallengeSchema().load(querydata) 
-            challenge = Challenge.query.get(querydata.get("title"))
-            if challenge is not None:
-                upload_dir = current_app.config.get('CHALLENGE_PICTURES_DIR', CHALLENGE_PICTURES_DIR)
-                os.makedirs(upload_dir, exist_ok=True)
-                save_path = os.path.join(upload_dir, newfilename)
-                picture.save(save_path)
-                challenge.icon = newfilename
-                db.session.commit()
-                return jsonify(challenge.to_dict()) 
+            if not picture:
+                old_picture = challenge.icon
+                if old_picture is None:
+                    abort(204, message='No icon to delete.')
+                else:
+                    upload_dir = current_app.config.get('CHALLENGE_PICTURES_DIR', CHALLENGE_PICTURES_DIR)
+                    old_path = os.path.join(upload_dir, old_picture)
+                    if os.path.exists(old_path):
+                        os.remove(old_path)
+                    challenge.icon = None
+                    db.session.commit()
+                    return Response(status=204)
             else:
-                abort(404, message='Title not found.')
+                originalfilename = picture.filename.replace(" ", "_")
+                newfilename = secure_filename(f"{str(datetime.datetime.now()).replace(" ", "_")}_{originalfilename}") 
+                if not allowfilename(newfilename):
+                    abort(400, message='Picture filename not allowed.')
+                if challenge is not None:
+                    upload_dir = current_app.config.get('CHALLENGE_PICTURES_DIR', CHALLENGE_PICTURES_DIR)
+                    os.makedirs(upload_dir, exist_ok=True)
+                    save_path = os.path.join(upload_dir, newfilename)
+                    picture.save(save_path)
+                    if challenge.icon is not None:
+                        old_path = os.path.join(upload_dir, challenge.icon)
+                        if os.path.exists(old_path):
+                            os.remove(old_path)
+                    challenge.icon = newfilename
+                    db.session.commit()
+                    return jsonify(challenge.to_dict()) 
+                else:
+                    abort(404, message='Challenge not found.')
         
         except ValidationError as error:
             traceback.print_exc()

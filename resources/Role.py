@@ -209,7 +209,7 @@ class RoleImg(MethodView):
                             "icon": {
                                 "type": "string",
                                 "format": "binary",
-                                "description": f"Role pic file {str(ALLOWED_PICTURE_EXTENSIONS)}"
+                                "description": f"Role pic file {str(ALLOWED_PICTURE_EXTENSIONS)}. If not provided, deletes the current icon.",
                             }
                         },
                         "required": ["icon"]
@@ -228,25 +228,40 @@ class RoleImg(MethodView):
     @blp.response(500, description='Internal server error.')
     def patch(self, querydata):
         try:
-
-            picture = request.files["icon"]
-            originalfilename = picture.filename.replace(" ", "_")
-            newfilename = secure_filename(f"{str(datetime.datetime.now()).replace(" ", "_")}_{originalfilename}") 
-            if not allowfilename(newfilename):
-                abort(400, message='Picture.')
-
-            querydata = TitleRoleSchema().load(querydata) 
+            querydata = TitleRoleSchema().load(querydata)
             role:Role = Role.query.get(querydata.get("title"))
-            if role is not None:
-                upload_dir = current_app.config.get('ROLE_PICTURES_DIR', ROLE_PICTURES_DIR)
-                os.makedirs(upload_dir, exist_ok=True)
-                save_path = os.path.join(upload_dir, newfilename)
-                picture.save(save_path)
-                role.icon = newfilename
-                db.session.commit()
-                return jsonify(role.to_dict()) 
+            picture = request.files["icon"]
+            if not picture:
+                old_picture = role.icon
+                if old_picture is None:
+                    abort(204, message='No icon to delete.')
+                else:
+                    upload_dir = current_app.config.get('ROLE_PICTURES_DIR', ROLE_PICTURES_DIR)
+                    old_path = os.path.join(upload_dir, old_picture)
+                    if os.path.exists(old_path):
+                        os.remove(old_path)
+                    role.icon = None
+                    db.session.commit()
+                    return Response(status=204)
             else:
-                abort(404, message='Role not found.')
+                originalfilename = picture.filename.replace(" ", "_")
+                newfilename = secure_filename(f"{str(datetime.datetime.now()).replace(" ", "_")}_{originalfilename}") 
+                if not allowfilename(newfilename):
+                    abort(400, message='Picture filename not allowed.')
+                if role is not None:
+                    upload_dir = current_app.config.get('ROLE_PICTURES_DIR', ROLE_PICTURES_DIR)
+                    os.makedirs(upload_dir, exist_ok=True)
+                    save_path = os.path.join(upload_dir, newfilename)
+                    picture.save(save_path)
+                    if role.icon is not None:
+                        old_path = os.path.join(upload_dir, role.icon)
+                        if os.path.exists(old_path):
+                            os.remove(old_path)
+                    role.icon = newfilename
+                    db.session.commit()
+                    return jsonify(role.to_dict()) 
+                else:
+                    abort(404, message='Role not found.')
         
         except ValidationError as error:
             traceback.print_exc()
