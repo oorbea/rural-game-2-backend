@@ -1,4 +1,5 @@
 from controllers.GameController import ChallengeProvider
+from enums.TurnType import TurnTypeEnum
 from models.Role import Role
 
 
@@ -29,7 +30,7 @@ class TurnManager(ChallengeProvider):
                 ponderated[fractional[i][0]] += 1
         return ponderated
     
-    def get_next_challenge(self, lobby_code: str, game_state: dict) -> dict:
+    def get_next_challenge(self, lobby_code: str, game_state: dict, type:TurnTypeEnum = TurnTypeEnum.CHALLENGE) -> dict:
         return {}
     
     def get_player_roles(self, lobby_code: str, players: list[str]) -> dict[str, str]:

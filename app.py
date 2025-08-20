@@ -16,6 +16,7 @@ from resources.socket_docs import blp as SocketDocsBlueprint
 from resources.Challenge import blp as ChallengeBlueprint
 from resources.UserPicture import blp as UserPictureBlueprint
 from resources.Role import blp as RoleBlueprint
+from resources.TurnTypes import blp as TurnTypesBlueprint
 
 from events.LobbyEvents import LobbyEvents
 
@@ -87,6 +88,8 @@ def create_app(settings_module: str | None = None):
         'jwt', {'type': 'http', 'scheme': 'bearer', 'bearerFormat': 'JWT', 'x-bearerInfoFunc': 'app.decode_token'}
     )
 
+    api.spec.options["security"] = [{"jwt": []}]
+
     socketio.init_app(app, cors_allowed_origins='*')
 
     # HTTP routes
@@ -95,6 +98,7 @@ def create_app(settings_module: str | None = None):
     api.register_blueprint(ChallengeBlueprint, url_prefix=getApiPrefix('challenge'))
     api.register_blueprint(UserPictureBlueprint, url_prefix=getApiPrefix(''))
     api.register_blueprint(RoleBlueprint, url_prefix=getApiPrefix('role'))
+    api.register_blueprint(TurnTypesBlueprint, url_prefix=getApiPrefix('turn-types'))
 
     # SocketIO events
     socketio.on_namespace(LobbyEvents(getSocketIOPrefix('lobby')))

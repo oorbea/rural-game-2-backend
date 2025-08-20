@@ -5,6 +5,7 @@ from flask_smorest import Blueprint
 blp = Blueprint('docs', __name__, description='SocketIO and API documentation')
 
 @blp.route("/asyncapi.yml")
+@blp.doc(security=[])
 def asyncapi_yaml():
     ASYNCAPI_PATH = os.path.join(os.path.dirname(__file__), "..", "asyncapi.yml")
     y = open(ASYNCAPI_PATH, "r", encoding="utf-8").read()
@@ -15,6 +16,7 @@ def asyncapi_yaml():
     return resp
 
 @blp.route("")
+@blp.doc(security=[])
 def asyncapi_docs():
     API_PREFIX = current_app.config.get('API_PREFIX')
     DOCS_HTML = f"""<!doctype html>

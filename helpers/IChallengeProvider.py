@@ -1,16 +1,19 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
+from enums.TurnType import TurnTypeEnum
+
 class ChallengeProvider(ABC):
     """Interface for providing challenges, player roles and more for a game lobby."""
 
     @abstractmethod
-    def get_next_challenge(self, lobby_code: str, game_state: dict[str, Any]) -> dict[str, Any]:
+    def get_next_challenge(self, lobby_code: str, game_state: dict[str, Any], type:TurnTypeEnum = TurnTypeEnum.CHALLENGE) -> dict[str, Any]:
         """Return the next challenge for the lobby.
 
         :param lobby_code: unique code identifying the lobby
         :param game_state: current state of the lobby, including
             players, turn index, roles and any custom flags
+        :param type: the type of challenge to return
         :returns: a serialisable dictionary representing the challenge
         """
         raise NotImplementedError("This method should be implemented by subclasses")

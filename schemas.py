@@ -1,5 +1,6 @@
 from marshmallow import INCLUDE, RAISE, Schema, ValidationError, fields, validate, validates, validates_schema
 from enums.GenderEnum import GenderEnum
+from enums.TurnType import TurnTypeEnum
 class ChallengeSchema(Schema):
     """Schema for validating challenge data."""
     title = fields.String(required=True, validate=validate.Length(min=1, max=100))
