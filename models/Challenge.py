@@ -13,6 +13,8 @@ class ChallengeDict(TypedDict):
     skipping: float|None = None
     voting: bool = False
     prize: int
+    males: int|None = None
+    females: int|None = None
 
 class Challenge(db.Model):
     __tablename__ = 'challenges'
@@ -28,6 +30,8 @@ class Challenge(db.Model):
     skipping = db.Column(db.Float, nullable=True, default=None)
     voting = db.Column(db.Boolean, nullable=False, default=False)
     prize = db.Column(db.Integer, nullable=False)
+    males = db.Column(db.Integer, nullable=True, default=None)
+    females = db.Column(db.Integer, nullable=True, default=None)
 
     def __repr__(self):
         return f"<Challenge {self.title}>"
@@ -45,6 +49,8 @@ class Challenge(db.Model):
             skipping=self.skipping,
             voting=self.voting,
             prize=self.prize,
+            males=self.males,
+            females=self.females
         )
 
     def __len__(self) -> int:

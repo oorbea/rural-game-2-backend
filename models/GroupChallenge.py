@@ -19,11 +19,14 @@ class GroupChallenge(db.Model):
     skipping = db.Column(db.Float, nullable=True, default=None)
     voting = db.Column(db.Boolean, nullable=False, default=False)
     prize = db.Column(db.Integer, nullable=False)
+    males = db.Column(db.Integer, nullable=True, default=None)
+    females = db.Column(db.Integer, nullable=True, default=None)
     player_quantity = db.Column(db.Integer, nullable=False, default=1)
     teams = db.Column(db.Integer, nullable=False, default=1)
+    pass # TODO: Implement specific fields for GroupChallenge if needed
 
     def __repr__(self):
-        return f"<Group Challenge {self.title} with ID {self.id}>"
+        return f"<Group Challenge {self.title}>"
     
     def to_dict(self) -> GroupChallengeDict:
         return GroupChallengeDict(
@@ -38,6 +41,8 @@ class GroupChallenge(db.Model):
             skipping=self.skipping,
             voting=self.voting,
             prize=self.prize,
+            males=self.males,
+            females=self.females,
             player_quantity=self.player_quantity,
             teams=self.teams
         )

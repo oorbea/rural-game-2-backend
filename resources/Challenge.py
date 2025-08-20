@@ -1,6 +1,7 @@
 import datetime
 import os
 import traceback
+from helpers.RestrictionAdapter import RestrictionAdapter
 from helpers.allow_filename import allowfilename
 from helpers.auth.decorators import admin_required, login_required
 from flask_smorest import Blueprint, abort
@@ -75,6 +76,14 @@ class ChallengeCRUD(MethodView):
             if getPrize is not None :
                 filters.append(Challenge.prize == getPrize)
 
+            getMales = request.args.get('males')
+            if getMales is not None :
+                filters.append(Challenge.males == getMales)
+
+            getFemales = request.args.get('females')
+            if getFemales is not None :
+                filters.append(Challenge.females == getFemales)
+
             if len(filters) > 0:
                 challenges = Challenge.query.filter(or_(*filters)).all()
             else:
@@ -97,9 +106,12 @@ class ChallengeCRUD(MethodView):
     @blp.response(403, description='You do not have permission for this operation')
     @blp.response(409, description='Conflict.')
     @blp.response(500, description='Internal server error.')
-    def post(self, data): 
+    def post(self, data:dict): 
         try:
             data = ChallengeSchema().load(data) 
+            description = data.get("description")
+            data['males'] = RestrictionAdapter.get_num_males(description)
+            data['females'] = RestrictionAdapter.get_num_females(description)
             challenge = Challenge(**data)
             db.session.add(challenge) 
             db.session.commit()
@@ -134,8 +146,13 @@ class ChallengeCRUD(MethodView):
             if challenge is not None:
                 bodydata = ChallengeSchema().load(bodydata) 
                 for key, value in bodydata.items():
+                    if key == 'males' or key == 'females':
+                        continue
                     if hasattr(challenge, key):
                         setattr(challenge, key, value)
+                        if key == 'description':
+                            setattr(challenge, 'males', RestrictionAdapter.get_num_males(value))
+                            setattr(challenge, 'females', RestrictionAdapter.get_num_females(value))
                 db.session.commit()
                 return Response(status=204)
             else:
@@ -169,8 +186,13 @@ class ChallengeCRUD(MethodView):
             if challenge is not None:
                 bodydata = GetChallengeSchema().load(bodydata) 
                 for key, value in bodydata.items():
+                    if key == 'males' or key == 'females':
+                        continue
                     if hasattr(challenge, key):
                         setattr(challenge, key, value)
+                        if key == 'description':
+                            setattr(challenge, 'males', RestrictionAdapter.get_num_males(value))
+                            setattr(challenge, 'females', RestrictionAdapter.get_num_females(value))
                 db.session.commit()
                 return jsonify(challenge.to_dict()) 
             else:

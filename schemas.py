@@ -14,6 +14,8 @@ class ChallengeSchema(Schema):
     skipping = fields.Float(required=False, allow_none=True, load_default=None)
     voting = fields.Boolean(required=False, load_default=False)
     prize = fields.Integer(required=True)
+    males = fields.Integer(required=True, allow_none=True, metadata={"description": "Number of male players required. Do not stablish this, it will be calculated automatically from the description."})
+    females = fields.Integer(required=True, allow_none=True, metadata={"description": "Number of female players required. Do not stablish this, it will be calculated automatically from the description."})
 
 class GetChallengeSchema(Schema):
     """Schema for validating challenge data."""
@@ -30,6 +32,8 @@ class GetChallengeSchema(Schema):
     skipping = fields.Float(required=False, allow_none=True)
     voting = fields.Boolean(required=False)
     prize = fields.Integer(required=False)
+    males = fields.Integer(required=False, allow_none=True)
+    females = fields.Integer(required=False, allow_none=True)
 
 class TitleChallengeSchema(Schema):
     """Schema for validating challenge data."""

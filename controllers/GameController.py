@@ -13,6 +13,7 @@ from datetime import datetime, date
 from typing import Any, Iterable
 import redis
 
+from enums.GenderEnum import GenderEnum
 from helpers.normalize_value import normalize_value
 from helpers.IChallengeProvider import ChallengeProvider
 from helpers.IPlayerManager import PlayerManager
@@ -54,7 +55,7 @@ class GameController:
         self.redis.sadd(self.ACTIVE_LOBBIES_SET, code)
 
         self.redis.rpush(players_list_key, host.username)
-        self._persist_lobby_user_info(code, host)  # <- per-lobby
+        self._persist_lobby_user_info(code, host)
         self._persist_player_state(code, PlayerState(username=host.username))
         return code
 
@@ -291,6 +292,10 @@ class GameController:
                 pass
         player_names = self.redis.lrange(players_list_key, 0, -1)
         players_state: dict[str, Any] = {}
+        restrictions = {
+            "males": 0,
+            "females": 0
+        }
         for name in player_names:
             state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=name)
             raw_state = self.redis.hgetall(state_key)
@@ -317,10 +322,18 @@ class GameController:
                 "secret_missions": secret_missions,
                 "connected": connected,
             }
+
+            user_key = self.LOBBY_USER_TEMPLATE.format(code=code, username=name)
+            gender = self.redis.hget(user_key, "gender")
+            if gender == GenderEnum.MALE.value:
+                restrictions["males"] += 1
+            elif gender == GenderEnum.FEMALE.value:
+                restrictions["females"] += 1
         return {
             "lobby": lobby_meta,
             "players": players_state,
             "order": player_names,
+            "restrictions": restrictions
         }
     
     def get_connected_players(self, code: str) -> list[dict[str, Any]]:
