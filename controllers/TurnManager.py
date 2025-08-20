@@ -1,4 +1,3 @@
-from flask_sqlalchemy import SQLAlchemy
 from random import choice
 from controllers.GameController import ChallengeProvider
 from enums.TurnType import TurnTypeEnum
@@ -34,7 +33,7 @@ class TurnManager(ChallengeProvider):
                 ponderated[fractional[i][0]] += 1
         return ponderated
     
-    def _get_valid_challenges(self, challenge: type[SQLAlchemy.Model], restrictions: dict) -> list[SQLAlchemy.Model]:
+    def _get_valid_challenges(self, challenge: type, restrictions: dict) -> list:
         """Get valid challenges based on restrictions."""
         if not restrictions:
             return challenge.query.all()
