@@ -14,6 +14,7 @@ from typing import Any, Iterable
 import redis
 
 from enums.GenderEnum import GenderEnum
+from enums.TurnType import TurnTypeEnum
 from helpers.normalize_value import normalize_value
 from helpers.IChallengeProvider import ChallengeProvider
 from helpers.IPlayerManager import PlayerManager
@@ -185,7 +186,7 @@ class GameController:
         self.redis.hset(lobby_key, "current_turn", 0)
         self.redis.hset(lobby_key, "started_at", datetime.now().astimezone().isoformat())
 
-    def next_turn(self, code: str) -> dict[str, Any]:
+    def next_turn(self, code: str, turn_type:TurnTypeEnum|str) -> tuple[dict[str, Any], str]:
         """Advance to the next player's turn and return the next challenge.
 
         The current_turn counter is incremented modulo the number of
@@ -194,8 +195,9 @@ class GameController:
         there are no players in the lobby, a ValueError is raised.
 
         :param code: lobby code
+        :param turn_type: the type of turn to progress to
         :returns: a challenge dictionary as provided by the
-            challenge provider
+            challenge provider and the username of the player whose turn it is
         """
         players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
         lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
@@ -203,6 +205,7 @@ class GameController:
         if player_count == 0:
             raise ValueError(f"Cannot progress turn; lobby {code} has no players")
 
+        player:str = None
         with self.redis.pipeline() as pipe:
             while True:
                 try:
@@ -211,13 +214,14 @@ class GameController:
                     next_turn_index = (current_turn + 1) % player_count
                     pipe.multi()
                     pipe.hset(lobby_key, "current_turn", next_turn_index)
+                    player = self.get_lobby_state(code)['order'][next_turn_index]
                     pipe.execute()
                     break
                 except redis.WatchError:
                     continue
         game_state = self.get_lobby_state(code)
-        challenge = self.challenge_provider.get_next_challenge(code, game_state)
-        return challenge
+        challenge = self.challenge_provider.get_next_challenge(code, game_state, turn_type)
+        return challenge, player
 
     def update_score(self, code: str, username: str, delta: int) -> None:
         """Adjust a player's score by a delta.
