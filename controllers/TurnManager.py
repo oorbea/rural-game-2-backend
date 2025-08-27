@@ -35,9 +35,10 @@ class TurnManager(ChallengeProvider):
             for i in range(remainder):
                 ponderated[fractional[i][0]] += 1
         return ponderated
-    
-    def _get_valid_challenges(self, code: str, challenge:type, restrictions: dict, player_name: str) -> list:
+        
+    def _get_valid_challenges(self, code: str, restrictions: dict, player_name: str) -> list[Challenge]:
         """Get valid challenges based on lobby composition and player attributes."""
+
         gc = current_app.extensions['game_controller']
         player:PlayerInfo = gc.get_player_info(code, player_name)
 
@@ -46,20 +47,62 @@ class TurnManager(ChallengeProvider):
             num_males = int(restrictions.get('males', 0))
             num_females = int(restrictions.get('females', 0))
             filters += [
-                challenge.males <= num_males,
-                challenge.females <= num_females,
+                Challenge.males <= num_males,
+                Challenge.females <= num_females,
             ]
 
         filters += [
-            or_(challenge.drinking.is_(False), challenge.drinking == player.drinking),
-            or_(challenge.smoking.is_(False), challenge.smoking == player.smoking),
-            or_(challenge.partner_friendly.is_(True), challenge.partner_friendly == player.partnered),
+            or_(Challenge.drinking.is_(False), Challenge.drinking == player.drinking),
+            or_(Challenge.smoking.is_(False), Challenge.smoking == player.smoking),
+            or_(Challenge.partner_friendly.is_(True), Challenge.partner_friendly == player.partnered),
+            or_(Challenge.sex.is_(False), Challenge.sex != player.virgin)
         ]
 
-        if challenge is not SecretMission:
-            filters.append(or_(challenge.sex.is_(False), challenge.sex != player.virgin))
+        return Challenge.query.filter(*filters).all()
+    
+    def _get_valid_group_challenges(self, code: str, restrictions: dict, player_name: str) -> set[GroupChallenge]:
+        """Get valid group challenges based on lobby composition and player attributes."""
 
-        return challenge.query.filter(*filters).all()
+        gc = current_app.extensions['game_controller']
+        player:PlayerInfo = gc.get_player_info(code, player_name)
+
+        filters = []
+        if restrictions:
+            num_males = int(restrictions.get('males', 0))
+            num_females = int(restrictions.get('females', 0))
+            filters += [
+                GroupChallenge.males <= num_males,
+                GroupChallenge.females <= num_females,
+            ]
+
+        filters += [
+            or_(GroupChallenge.drinking.is_(False), GroupChallenge.drinking == player.drinking),
+            or_(GroupChallenge.smoking.is_(False), GroupChallenge.smoking == player.smoking),
+            or_(GroupChallenge.partner_friendly.is_(True), GroupChallenge.partner_friendly == player.partnered),
+            or_(GroupChallenge.sex.is_(False), GroupChallenge.sex != player.virgin)
+        ]
+
+        return set(GroupChallenge.query.filter(*filters).all())
+    
+    def _choose_group_challenge(self, player:str, challenges: list[GroupChallenge], players_list: list[PlayerInfo]) -> GroupChallenge|None:
+        if not challenges:
+            return None
+
+        challenge_found = False
+        while not challenge_found:
+            challenge = choice(challenges)
+            # Obtén la lista de jugadores que cumplen con las restricciones del challenge
+            players_list_copy = [
+                p for p in players_list
+                if (challenge.males is None or p.gender == 'male' or challenge.males == 0)
+                and (challenge.females is None or p.gender == 'female' or challenge.females == 0)
+                and (challenge.drinking is False or p.drinking == challenge.drinking)
+                and (challenge.smoking is False or p.smoking == challenge.smoking)
+                and (challenge.partner_friendly is True or p.partnered == challenge.partner_friendly)
+                and (challenge.sex is False or p.virgin != challenge.sex)
+            ]
+            if challenge.player_quantity <= len(players_list):
+                pass
     
     def get_next_challenge(self, lobby_code: str, game_state: dict, type:TurnTypeEnum|str = TurnTypeEnum.CHALLENGE) -> dict:
         if not lobby_code:
