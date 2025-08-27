@@ -14,8 +14,8 @@ class ChallengeSchema(Schema):
     skipping = fields.Float(required=False, allow_none=True, load_default=None)
     voting = fields.Boolean(required=False, load_default=False)
     prize = fields.Integer(required=True)
-    males = fields.Integer(required=True, allow_none=True, metadata={"description": "Number of male players required. Do not stablish this, it will be calculated automatically from the description."})
-    females = fields.Integer(required=True, allow_none=True, metadata={"description": "Number of female players required. Do not stablish this, it will be calculated automatically from the description."})
+    males = fields.Integer(required=False, allow_none=True, metadata={"description": "Number of male players required. Do not stablish this, it will be calculated automatically from the description."})
+    females = fields.Integer(required=False, allow_none=True, metadata={"description": "Number of female players required. Do not stablish this, it will be calculated automatically from the description."})
 
 class GetChallengeSchema(Schema):
     """Schema for validating challenge data."""
@@ -55,6 +55,29 @@ class SecretMissionSchema(Schema):
     icon = fields.String(required=False, allow_none=True, load_default=None)
     prize = fields.Integer(required=True)
     punishment = fields.Float(required=True)
+    males = fields.Integer(required=False, allow_none=True, metadata={"description": "Number of male players required. Do not stablish this, it will be calculated automatically from the description."})
+    females = fields.Integer(required=False, allow_none=True, metadata={"description": "Number of female players required. Do not stablish this, it will be calculated automatically from the description."})
+
+class GetSecretMissionSchema(Schema):
+    """Schema for validating secret mission data."""
+    class Meta:
+        unknown = RAISE
+    title = fields.String(required=False, validate=validate.Length(min=1, max=100))
+    description = fields.String(required=False, validate=validate.Length(min=1, max=500))
+    drinking = fields.Boolean(required=False)
+    sex = fields.Boolean(required=False)
+    smoking = fields.Boolean(required=False)
+    partner_friendly = fields.Boolean(required=False)
+    probability = fields.Float(required=False)
+    icon = fields.String(required=False, allow_none=True)
+    prize = fields.Integer(required=False)
+    punishment = fields.Float(required=False)
+    males = fields.Integer(required=False, allow_none=True)
+    females = fields.Integer(required=False, allow_none=True)
+
+class TitleSecretMissionSchema(Schema):
+    """Schema for validating secret mission data."""
+    title = fields.String(required=True, validate=validate.Length(min=1, max=100))
 
 class PlayerInfoSchema(Schema):
     """Schema for validating player info."""

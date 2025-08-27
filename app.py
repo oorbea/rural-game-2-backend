@@ -17,6 +17,7 @@ from resources.Challenge import blp as ChallengeBlueprint
 from resources.UserPicture import blp as UserPictureBlueprint
 from resources.Role import blp as RoleBlueprint
 from resources.TurnTypes import blp as TurnTypesBlueprint
+from resources.SecretMission import blp as SecretMissionBlueprint 
 
 from events.LobbyEvents import LobbyEvents
 
@@ -94,6 +95,7 @@ def create_app(settings_module: str | None = None):
 
     # HTTP routes
     api.register_blueprint(MainPageBlueprint, url_prefix=getApiPrefix(''))
+    api.register_blueprint(SecretMissionBlueprint, url_prefix=getApiPrefix('secret_mission'))
     api.register_blueprint(SocketDocsBlueprint, url_prefix=getApiPrefix('docs'))
     api.register_blueprint(ChallengeBlueprint, url_prefix=getApiPrefix('challenge'))
     api.register_blueprint(UserPictureBlueprint, url_prefix=getApiPrefix(''))
