@@ -21,7 +21,7 @@ from resources.SecretMission import blp as SecretMissionBlueprint
 from resources.GroupChallenge import blp as GroupChallengeBlueprint
 from resources.TargetChallenge import blp as TargetChallengeBlueprint
 
-from events.LobbyEvents import LobbyEvents
+from events.GameEvents import GameEvents
 
 socketio = SocketIO(message_queue="redis://redis:6379/0", cors_allowed_origins='*')
 
@@ -107,7 +107,7 @@ def create_app(settings_module: str | None = None):
     api.register_blueprint(TargetChallengeBlueprint, url_prefix=getApiPrefix('target_challenge'))
 
     # SocketIO events
-    socketio.on_namespace(LobbyEvents(getSocketIOPrefix('lobby')))
+    socketio.on_namespace(GameEvents(getSocketIOPrefix('game')))
 
     with app.app_context():
         db = create_db(app)

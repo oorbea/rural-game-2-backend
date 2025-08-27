@@ -4,22 +4,20 @@ info:
   version: '{{API_VERSION}}'
   description: |
     Real-time API for lobby management and game control in Rural Game 2.
-    This specification describes the Socket.IO events used to manage lobbies,
-    handle player actions and broadcast game state. The events are published
-    and subscribed over a WebSocket endpoint using Socket.IO. Profile pictures
-    are served over HTTP but referenced in events via absolute URLs.
+    Socket.IO events for lobbies, players and turns.
+    Client emits (publish) include Socket.IO acks documented via x-ack.
 
 servers:
   production:
-    url: ws://ruralgame.ddns.net{PREFIX}/lobby
+    url: ws://ruralgame.ddns.net{PREFIX}/game
     protocol: ws
-    description: Production WebSocket server for the lobby namespace.
+    description: Production WebSocket server for the lobby and game namespace.
     variables:
       PREFIX:
         default: /api/v1
         description: API prefix (namespace root)
   local:
-    url: ws://localhost:5000{PREFIX}/lobby
+    url: ws://localhost:5000{PREFIX}/game
     protocol: ws
     description: Local development WebSocket server (Flask-SocketIO).
     variables:
@@ -35,6 +33,10 @@ channels:
       summary: Create a new lobby with the provided player information.
       message:
         $ref: '#/components/messages/CreateLobby'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckCreateLobbySuccess'
+          - $ref: '#/components/schemas/AckError'
 
   join_lobby:
     description: Client requests to join a lobby.
@@ -43,6 +45,10 @@ channels:
       summary: Join an existing lobby by code.
       message:
         $ref: '#/components/messages/JoinLobby'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckJoinLobbySuccess'
+          - $ref: '#/components/schemas/AckError'
 
   leave_lobby:
     description: Client requests to leave a lobby.
@@ -51,6 +57,10 @@ channels:
       summary: Leave the specified lobby.
       message:
         $ref: '#/components/messages/LeaveLobby'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckLeaveLobbySuccess'
+          - $ref: '#/components/schemas/AckError'
 
   start_game:
     description: Client requests to start the game for a lobby.
@@ -59,6 +69,10 @@ channels:
       summary: Start the game in the specified lobby.
       message:
         $ref: '#/components/messages/StartGame'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckOkOnly'
+          - $ref: '#/components/schemas/AckError'
 
   update_player:
     description: Client requests to update their player information.
@@ -67,6 +81,10 @@ channels:
       summary: Update player information in the lobby.
       message:
         $ref: '#/components/messages/UpdatePlayer'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckUpdatePlayerSuccess'
+          - $ref: '#/components/schemas/AckError'
 
   update_profile_picture:
     description: Client requests to add, replace or remove a player's profile picture.
@@ -75,6 +93,10 @@ channels:
       summary: Update a player's profile picture (send base64 or data URL; or remove it).
       message:
         $ref: '#/components/messages/UpdateProfilePicture'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckUpdateProfilePictureSuccess'
+          - $ref: '#/components/schemas/AckError'
 
   get_user_info:
     description: Client requests to get their own player information.
@@ -83,6 +105,27 @@ channels:
       summary: Retrieve the player's own information.
       message:
         $ref: '#/components/messages/GetUserInfo'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckGetUserInfoSuccess'
+          - $ref: '#/components/schemas/AckError'
+
+  next_turn:
+    description: Client requests to progress to the next turn with a given turn type.
+    publish:
+      operationId: nextTurn
+      summary: Progress to the next turn and trigger a new challenge broadcast.
+      message:
+        $ref: '#/components/messages/NextTurn'
+      x-ack:
+        description: |
+          Ack varies by turn type:
+            - challenge, group_challenge => { ok: true }
+            - secret_mission, target_challenge => { ok: true, challenge: {...} }
+        oneOf:
+          - $ref: '#/components/schemas/AckOkOnly'
+          - $ref: '#/components/schemas/AckNextTurnChallengeSuccess'
+          - $ref: '#/components/schemas/AckError'
 
   player_joined:
     description: Notification sent when a player joins a lobby.
@@ -124,6 +167,16 @@ channels:
       message:
         $ref: '#/components/messages/ProfilePictureUpdated'
 
+  following_turn:
+    description: Broadcast with the next turn info. Payload depends on turn type.
+    subscribe:
+      operationId: followingTurn
+      summary: Receive the upcoming turn data (type, player, and optionally challenge).
+      message:
+        oneOf:
+          - $ref: '#/components/messages/FollowingTurnWithChallenge'
+          - $ref: '#/components/messages/FollowingTurnWithoutChallenge'
+
   error:
     description: Error notifications related to lobby or game operations.
     subscribe:
@@ -140,8 +193,7 @@ components:
       summary: Message sent by the client to create a new lobby.
       payload:
         type: object
-        required:
-          - player
+        required: [player]
         properties:
           player:
             $ref: '#/components/schemas/PlayerInfo'
@@ -152,9 +204,7 @@ components:
       summary: Message sent by the client to join a lobby.
       payload:
         type: object
-        required:
-          - code
-          - player
+        required: [code, player]
         properties:
           code:
             $ref: '#/components/schemas/LobbyCode'
@@ -167,9 +217,7 @@ components:
       summary: Message sent by the client to leave a lobby.
       payload:
         type: object
-        required:
-          - code
-          - player_name
+        required: [code, player_name]
         properties:
           code:
             $ref: '#/components/schemas/LobbyCode'
@@ -183,9 +231,7 @@ components:
       summary: Message sent by the client to initiate the game in a lobby.
       payload:
         type: object
-        required:
-          - code
-          - player_name
+        required: [code, player_name]
         properties:
           code:
             $ref: '#/components/schemas/LobbyCode'
@@ -199,33 +245,24 @@ components:
       summary: Message sent by the client to update their player information.
       payload:
         type: object
-        required:
-          - code
-          - current_username
+        required: [code, current_username]
         properties:
           code:
             $ref: '#/components/schemas/LobbyCode'
           current_username:
             type: string
-            description: Current username of the player to update.
           new_username:
             type: string
-            description: New username for the player (optional).
           drinking:
             type: boolean
-            description: Whether the player drinks alcohol (optional).
           smoking:
             type: boolean
-            description: Whether the player smokes (optional).
           partnered:
             type: boolean
-            description: Whether the player is in a relationship (optional).
           virgin:
             type: boolean
-            description: Whether the player is a virgin (optional).
           gender:
             $ref: '#/components/schemas/GenderEnum'
-            description: Gender of the player (optional).
 
     UpdateProfilePicture:
       name: UpdateProfilePicture
@@ -240,15 +277,25 @@ components:
       summary: Message sent by the client to retrieve their own player information.
       payload:
         type: object
-        required:
-          - code
-          - player_name
+        required: [code, player_name]
         properties:
           code:
             $ref: '#/components/schemas/LobbyCode'
           player_name:
             type: string
-            description: Username of the player requesting their information.
+
+    NextTurn:
+      name: NextTurn
+      title: Next Turn
+      summary: Client requests to advance the turn and generate a challenge of the specified type.
+      payload:
+        type: object
+        required: [code, turn_type]
+        properties:
+          code:
+            $ref: '#/components/schemas/LobbyCode'
+          turn_type:
+            $ref: '#/components/schemas/TurnTypeEnum'
 
     PlayerJoined:
       name: PlayerJoined
@@ -256,17 +303,14 @@ components:
       summary: Notification that a new player has joined a lobby.
       payload:
         type: object
-        required:
-          - player
+        required: [player]
         properties:
           player:
             type: string
-            description: Username of the player who joined.
           profile_picture_url:
             type: string
             format: uri
             nullable: true
-            description: Absolute URL to the player's profile picture (may include cache-buster).
 
     PlayerLeft:
       name: PlayerLeft
@@ -274,17 +318,12 @@ components:
       summary: Notification that a player has left a lobby.
       payload:
         type: object
-        required:
-          - player
-          - host
+        required: [player, host]
         properties:
-          player:
-            type: string
-            description: Username of the player who left.
+          player: { type: string }
           host:
             type: string
             nullable: true
-            description: Username of the current host after the player left, or null if the lobby was removed.
 
     GameStarted:
       name: GameStarted
@@ -299,21 +338,14 @@ components:
       summary: Notification that a player has updated their information.
       payload:
         type: object
-        required:
-          - old_username
-          - new_username
+        required: [old_username, new_username]
         properties:
-          old_username:
-            type: string
-            description: Previous username of the player.
-          new_username:
-            type: string
-            description: New username of the player.
+          old_username: { type: string }
+          new_username: { type: string }
           profile_picture_url:
             type: string
             format: uri
             nullable: true
-            description: Absolute URL to the player's current profile picture (may include cache-buster).
 
     ProfilePictureUpdated:
       name: ProfilePictureUpdated
@@ -321,21 +353,37 @@ components:
       summary: Notification that a player's profile picture has changed or was removed.
       payload:
         type: object
-        required:
-          - player
-          - removed
+        required: [player, removed]
         properties:
-          player:
-            type: string
-            description: Username whose picture changed.
+          player: { type: string }
           profile_picture_url:
             type: string
             format: uri
             nullable: true
-            description: Absolute URL to the new profile picture (present when removed = false).
-          removed:
-            type: boolean
-            description: True if the picture was removed; otherwise false.
+          removed: { type: boolean }
+
+    FollowingTurnWithChallenge:
+      name: FollowingTurnWithChallenge
+      title: Following Turn (with challenge)
+      summary: Broadcast for challenge/group_challenge turns.
+      payload:
+        type: object
+        required: [turn_type, challenge, player]
+        properties:
+          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
+          challenge: { $ref: '#/components/schemas/Challenge' }
+          player: { type: string }
+
+    FollowingTurnWithoutChallenge:
+      name: Following Turn (no challenge)
+      title: Following Turn (without challenge)
+      summary: Broadcast for secret_mission/target_challenge turns.
+      payload:
+        type: object
+        required: [turn_type, player]
+        properties:
+          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
+          player: { type: string }
 
     Error:
       name: Error
@@ -349,6 +397,9 @@ components:
             description: Human-readable error message.
 
   schemas:
+    # -----------------------
+    # Common primitives/enums
+    # -----------------------
     LobbyCode:
       type: string
       description: Unique 4-digit lobby code.
@@ -357,79 +408,50 @@ components:
     GenderEnum:
       type: string
       description: Gender of the player.
-      enum:
-        - male
-        - female
+      enum: [male, female]
 
+    TurnTypeEnum:
+      type: string
+      description: Type of turn to progress to.
+      enum: [challenge_type, group_challenge_type, secret_mission_type, target_challenge_type]
+
+    # -----------------------
+    # Domain models
+    # -----------------------
     PlayerInfo:
       type: object
-      description: Static information about a player provided when they join a lobby.
-      required:
-        - username
-        - drinking
-        - smoking
-        - partnered
-        - virgin
-        - gender
+      required: [username, drinking, smoking, partnered, virgin, gender]
       properties:
-        username:
-          type: string
-          description: Unique username of the player.
-        drinking:
-          type: boolean
-          description: Whether the player drinks alcohol.
-        smoking:
-          type: boolean
-          description: Whether the player smokes.
-        partnered:
-          type: boolean
-          description: Whether the player is in a relationship.
-        virgin:
-          type: boolean
-          description: Whether the player is a virgin.
-        gender:
-          $ref: '#/components/schemas/GenderEnum'
+        username: { type: string }
+        drinking: { type: boolean }
+        smoking: { type: boolean }
+        partnered: { type: boolean }
+        virgin: { type: boolean }
+        gender: { $ref: '#/components/schemas/GenderEnum' }
         profile_pic:
           type: string
           nullable: true
-          description: Optional identifier for the player's profile picture (generally not used at join time).
+          description: Optional identifier/relative path used internally.
 
     PlayerState:
       type: object
-      description: Dynamic state of a player within a lobby.
-      required:
-        - username
-        - points
-        - secret_missions
-        - connected
+      required: [username, points, secret_missions, connected]
       properties:
-        username:
-          type: string
-          description: Username of the player.
-        points:
-          type: integer
-          description: Current score of the player.
+        username: { type: string }
+        points: { type: integer }
         role:
           type: string
           nullable: true
-          description: Role assigned to the player in the current game.
         secret_missions:
           type: array
-          items:
-            type: string
-          description: List of secret missions assigned to the player.
-        connected:
-          type: boolean
-          description: Indicates if the player is currently connected via websocket.
+          items: { type: string }
+        connected: { type: boolean }
 
     ConnectedPlayer:
       type: object
-      description: Connected player plus a URL to their profile picture.
-      required:
-        - username
+      required: [username]
       properties:
-        username:
-          type: string
+        username: { type: string }
         profile_picture_url:
           type: string
           format: uri
@@ -437,75 +459,148 @@ components:
 
     GameState:
       type: object
-      description: Full state of a lobby including lobby metadata, players and turn order.
+      description: Full state of a lobby including lobby metadata, players, order and restrictions.
       properties:
         lobby:
           type: object
-          description: Metadata about the lobby (e.g., creation time, current turn).
         players:
           type: object
-          description: Mapping of usernames to their dynamic state.
           additionalProperties:
             $ref: '#/components/schemas/PlayerState'
         order:
           type: array
-          items:
-            type: string
-          description: Ordered list of usernames representing turn rotation.
+          items: { type: string }
+        restrictions:
+          type: object
+          properties:
+            males: { type: integer, minimum: 0 }
+            females: { type: integer, minimum: 0 }
+
+    Challenge:
+      type: object
+      description: Generic challenge payload enriched by backend (includes icon URL).
+      properties:
+        title: { type: string }
+        description: { type: string, nullable: true }
+        males: { type: integer, nullable: true }
+        females: { type: integer, nullable: true }
+        icon:
+          type: string
+          format: uri
 
     UpdateProfilePicturePayload:
       type: object
-      description: |
-        Update or remove a player's profile picture.
-
-        To remove:
-          - Set `remove: true`. All other image fields are optional/ignored.
-
-        To upload/replace, provide EXACTLY ONE of the following inputs:
-          1) `image_base64` (raw base64 content) + `extension`
-          2) `image_base64` (raw base64 content) + `filename` (the file extension is inferred)
-          3) `data_url` formatted as `data:image/<ext>;base64,<content>` (the file extension is inferred)
-
-        Notes:
-          - Supported extensions are typically: png, jpg, jpeg, gif (configurable on the server).
-          - Do not send both `data_url` and `image_base64` at the same time.
-          - The server stores a relative file path in Redis but responds/announces a cache-busted URL for clients.
-          - When replacing a picture, the previous file on disk is removed.
-
-      required:
-        - code
-        - player_name
+      description: Update or remove a player's profile picture.
+      required: [code, player_name]
       properties:
-        code:
-          $ref: '#/components/schemas/LobbyCode'
-        player_name:
-          type: string
-          description: Username whose picture will be updated.
+        code: { $ref: '#/components/schemas/LobbyCode' }
+        player_name: { type: string }
         remove:
           type: boolean
           default: false
-          description: When true, removes the current profile picture.
         data_url:
           type: string
-          description: Data URL of the image (e.g. "data:image/png;base64,<...>").
           pattern: '^data:image\/[A-Za-z0-9]+;base64,.+'
-        image_base64:
-          type: string
-          description: Raw base64-encoded image bytes (use when not sending a full data URL).
+        image_base64: { type: string }
         extension:
           type: string
-          description: File extension to use when saving the image (ignored if `data_url` provides it).
           enum: [png, jpg, jpeg, gif]
-        filename:
-          type: string
-          description: Optional original filename (may be used to infer extension).
+        filename: { type: string }
       anyOf:
-        - properties:
-            remove:
-              const: true
+        - properties: { remove: { const: true } }
           required: [code, player_name, remove]
-          description: Remove the current profile picture.
         - anyOf:
             - required: [code, player_name, data_url]
             - required: [code, player_name, image_base64, extension]
-          description: Upload or replace the profile picture.
+
+    # -----------------------
+    # Ack payloads (Socket.IO)
+    # -----------------------
+    AckError:
+      type: object
+      required: [ok, error]
+      properties:
+        ok: { type: boolean, const: false }
+        error: { type: string }
+
+    AckOkOnly:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean, const: true }
+
+    AckCreateLobbySuccess:
+      type: object
+      required: [ok, code, connected_players]
+      properties:
+        ok: { type: boolean, const: true }
+        code: { $ref: '#/components/schemas/LobbyCode' }
+        connected_players:
+          type: array
+          items: { $ref: '#/components/schemas/ConnectedPlayer' }
+
+    AckJoinLobbySuccess:
+      type: object
+      required: [connected_players]
+      properties:
+        connected_players:
+          type: array
+          items: { $ref: '#/components/schemas/ConnectedPlayer' }
+
+    AckLeaveLobbySuccess:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean, const: true }
+        host:
+          type: string
+          nullable: true
+          description: New host username, or null if lobby was removed.
+
+    AckUpdatePlayerSuccess:
+      type: object
+      required: [ok, player, profile_picture_url]
+      properties:
+        ok: { type: boolean, const: true }
+        player: { type: string }
+        profile_picture_url:
+          type: string
+          format: uri
+
+    AckGetUserInfoSuccess:
+      type: object
+      required: [ok, player_info]
+      properties:
+        ok: { type: boolean, const: true }
+        player_info:
+          type: object
+          required: [username, drinking, smoking, partnered, virgin, gender, profile_picture_url]
+          properties:
+            username: { type: string }
+            drinking: { type: boolean }
+            smoking: { type: boolean }
+            partnered: { type: boolean }
+            virgin: { type: boolean }
+            gender: { $ref: '#/components/schemas/GenderEnum' }
+            profile_picture_url:
+              type: string
+              format: uri
+
+    AckUpdateProfilePictureSuccess:
+      type: object
+      required: [ok, player, profile_picture_url, removed]
+      properties:
+        ok: { type: boolean, const: true }
+        player: { type: string }
+        profile_picture_url:
+          type: string
+          format: uri
+        removed: { type: boolean }
+
+    AckNextTurnChallengeSuccess:
+      type: object
+      description: Returned only for secret_mission and target_challenge.
+      required: [ok, challenge]
+      properties:
+        ok: { type: boolean, const: true }
+        challenge: { $ref: '#/components/schemas/Challenge' }

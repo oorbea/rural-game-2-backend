@@ -136,6 +136,11 @@ class CodeAndUsernameSchema(Schema):
     player_name = fields.String(required=True)
     code = fields.String(required=True, validate=validate.Length(equal=4))
 
+class CodeAndTurnTypeSchema(Schema):
+    """Schema for validating code and turn type data."""
+    code = fields.String(required=True, validate=validate.Length(equal=4))
+    turn_type = fields.String(required=True, validate=validate.OneOf([member.value for member in TurnTypeEnum]))
+
 class UpdatePlayerSchema(Schema):
     """Schema for validating player updates."""
     current_username = fields.String(required=True)

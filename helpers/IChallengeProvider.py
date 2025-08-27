@@ -7,7 +7,7 @@ class ChallengeProvider(ABC):
     """Interface for providing challenges, player roles and more for a game lobby."""
 
     @abstractmethod
-    def get_next_challenge(self, lobby_code: str, game_state: dict[str, Any], type:TurnTypeEnum = TurnTypeEnum.CHALLENGE) -> dict[str, Any]:
+    def get_next_challenge(self, lobby_code: str, game_state: dict[str, Any], type:TurnTypeEnum|str = TurnTypeEnum.CHALLENGE) -> dict[str, Any]:
         """Return the next challenge for the lobby.
 
         :param lobby_code: unique code identifying the lobby
