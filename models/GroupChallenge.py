@@ -1,7 +1,7 @@
 from db import db
 from models.Challenge import ChallengeDict
 
-class GroupChallengeDict(ChallengeDict):
+class GroupChallengeDict(ChallengeDict): 
     player_quantity: int = 1
     teams: int = 1
 

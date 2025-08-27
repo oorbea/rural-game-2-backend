@@ -19,6 +19,7 @@ from resources.Role import blp as RoleBlueprint
 from resources.TurnTypes import blp as TurnTypesBlueprint
 from resources.SecretMission import blp as SecretMissionBlueprint 
 from resources.GroupChallenge import blp as GroupChallengeBlueprint
+from resources.TargetChallenge import blp as TargetChallengeBlueprint
 
 from events.LobbyEvents import LobbyEvents
 
@@ -103,6 +104,7 @@ def create_app(settings_module: str | None = None):
     api.register_blueprint(UserPictureBlueprint, url_prefix=getApiPrefix(''))
     api.register_blueprint(RoleBlueprint, url_prefix=getApiPrefix('role'))
     api.register_blueprint(TurnTypesBlueprint, url_prefix=getApiPrefix('turn-types'))
+    api.register_blueprint(TargetChallengeBlueprint, url_prefix=getApiPrefix('target_challenge'))
 
     # SocketIO events
     socketio.on_namespace(LobbyEvents(getSocketIOPrefix('lobby')))
