@@ -20,6 +20,7 @@ from helpers.IChallengeProvider import ChallengeProvider
 from helpers.IPlayerManager import PlayerManager
 from helpers.PlayerInfo import PlayerInfo
 from helpers.PlayerState import PlayerState
+from models.Challenge import Challenge
 
 class GameController:
     """Controller responsible for managing game lobbies and state.
@@ -222,18 +223,41 @@ class GameController:
         game_state = self.get_lobby_state(code)
         challenge = self.challenge_provider.get_next_challenge(code, game_state, turn_type)
         return challenge, player
+    
+    def skip_turn(self, code: str, player:str, turn_type: TurnTypeEnum|str, title: str) -> int:
+        """Skip the current turn without changing the turn index.
 
-    def update_score(self, code: str, username: str, delta: int) -> None:
+        This is useful for challenges that do not require a player action,
+        such as group challenges or secret missions. The turn index remains
+        unchanged, so the same player will be up next.
+
+        :param code: lobby code
+        :param player: player who is skipping their turn
+        :param turn_type: the type of turn to skip
+        :param title: the title of the challenge being skipped
+        :returns: the new total score for the player
+        """
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+        player_count:int = self.redis.llen(players_list_key)
+        if player_count == 0:
+            raise ValueError(f"Cannot skip turn; lobby {code} has no players")
+
+        turn_type = TurnTypeEnum(turn_type) if isinstance(turn_type, str) else turn_type
+        return self.challenge_provider.skip_turn(code, player, turn_type, title)
+
+    def update_score(self, code: str, username: str, delta: int) -> int:
         """Adjust a player's score by a delta.
 
         :param code: lobby code
         :param username: player whose score to update
         :param delta: signed integer to add to the player's points
+        :returns: the new total score for the player
         """
         state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=username)
         if not self.redis.exists(state_key):
             raise ValueError(f"No state for player {username} in lobby {code}")
         self.redis.hincrby(state_key, "points", delta)
+        return int(self.redis.hget(state_key, "points") or 0)
 
     def assign_role(self, code: str, username: str, role: str) -> None:
         """Assign a role to a player.

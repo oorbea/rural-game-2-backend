@@ -456,3 +456,44 @@ class TurnManager(ChallengeProvider):
             players_with_roles[player] = "default"
         
         return players_with_roles
+    
+    def skip_turn(self, lobby_code: str, player:str, turn_type: TurnTypeEnum, title: str) -> int:
+        if not lobby_code:
+            raise ValueError("Lobby code is required to skip a turn")
+        if not player:
+            raise ValueError("Player is required to skip a turn")
+        if not turn_type:
+            raise ValueError("Turn type is required to skip a turn")
+        if not title:
+            raise ValueError("Challenge title is required to skip a turn")
+
+        match turn_type:
+            case TurnTypeEnum.CHALLENGE:
+                challenge:Challenge = Challenge.query.get(title)
+                if not challenge:
+                    raise ValueError(f"Challenge '{title}' not found to skip")
+                if challenge.skipping is None:
+                    raise ValueError(f"Challenge '{title}' cannot be skipped")
+                return self.gc.update_score(lobby_code, player, -challenge.skipping)
+            
+            case TurnTypeEnum.GROUP_CHALLENGE:
+                group_challenge:GroupChallenge = GroupChallenge.query.get(title)
+                if not group_challenge:
+                    raise ValueError(f"Group challenge '{title}' not found to skip")
+                if group_challenge.skipping is None:
+                    raise ValueError(f"Group challenge '{title}' cannot be skipped")
+                return self.gc.update_score(lobby_code, player, -group_challenge.skipping)
+            
+            case TurnTypeEnum.SECRET_MISSION:
+                raise ValueError(f"Secret missions cannot be skipped")
+            
+            case TurnTypeEnum.TARGET_CHALLENGE:
+                target_challenge:TargetChallenge = TargetChallenge.query.get(title)
+                if not target_challenge:
+                    raise ValueError(f"Target challenge '{title}' not found to skip")
+                if target_challenge.skipping is None:
+                    raise ValueError(f"Target challenge '{title}' cannot be skipped")
+                return self.gc.update_score(lobby_code, player, -target_challenge.skipping)
+            
+            case _:
+                raise ValueError(f"Unsupported turn type: {turn_type}. Supported types are: {(e.value for e in TurnTypeEnum)}")

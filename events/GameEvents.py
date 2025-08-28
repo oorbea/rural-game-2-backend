@@ -5,7 +5,7 @@ from marshmallow import ValidationError
 from controllers.GameController import GameController
 from enums.TurnType import TurnTypeEnum
 from helpers.PlayerInfo import PlayerInfo
-from schemas import CodeAndDescriptionSchema, CodeAndTurnTypeSchema, PlayerInfoSchema, CodeAndUsernameSchema, CodeAndPlayerSchema, UpdatePlayerSchema
+from schemas import CodeAndDescriptionSchema, CodeAndTurnTypeSchema, PlayerInfoSchema, CodeAndUsernameSchema, CodeAndPlayerSchema, SkipTurnSchema, UpdatePlayerSchema
 import base64
 import re
 import time
@@ -401,3 +401,42 @@ class GameEvents(Namespace):
         except Exception as e:
             self.emit('error', {'message': f'An error occurred while choosing a target.\n{str(e)}'}, room=code)
             return {'ok': False, 'error': f'An error occurred while choosing a target.\n{str(e)}'}
+        
+    def on_skip_turn(self, data:dict):
+        """Skip the current turn in the game."""
+        try:
+            code = data['code'] = str(data['code'])
+            player = data['player_name']
+            turn_type = data['turn_type']
+            title = data['title']
+        except KeyError:
+            return {'ok': False, 'error': 'Lobby code, turn type and title of the challenge are required to skip a turn.'}
+        
+        schema = SkipTurnSchema()
+        try:
+            data = schema.load(data)
+        except ValidationError as e:
+            return {'ok': False, 'error': str(e)}
+        
+        if turn_type == TurnTypeEnum.SECRET_MISSION.value:
+            return {'ok': False, 'error': 'Cannot skip a Secret Mission turn.'}
+        
+        gc: GameController = current_app.extensions['game_controller']
+
+        try:
+            new_score = gc.skip_turn(code, player, turn_type, title)
+
+            self.emit('turn_skipped', {
+                'player': player,
+                'turn_type': turn_type,
+                'title': title,
+                'new_score': new_score
+            }, room=code)
+
+            return {'ok': True}
+
+        except ValueError as e:
+            return {'ok': False, 'error': str(e)}
+        except Exception as e:
+            self.emit('error', {'message': f'An error occurred while skipping the turn.\n{str(e)}'}, room=code)
+            return {'ok': False, 'error': f'An error occurred while skipping the turn.\n{str(e)}'}

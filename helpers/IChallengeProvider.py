@@ -28,3 +28,16 @@ class ChallengeProvider(ABC):
         :returns: a dictionary mapping usernames to their assigned roles
         """
         raise NotImplementedError("This method should be implemented by subclasses")
+    
+    @abstractmethod
+    def skip_turn(self, lobby_code: str, player: str, turn_type: TurnTypeEnum, title: str) -> int:
+        """Skip the current turn for the specified player.
+        This method is called when a player chooses to skip their turn.
+
+        :param lobby_code: unique code identifying the lobby
+        :param player: player who is skipping their turn
+        :param turn_type: the type of turn being skipped
+        :param title: the title of the challenge being skipped
+        :returns: the new total score for the player
+        """
+        raise NotImplementedError("This method should be implemented by subclasses")
