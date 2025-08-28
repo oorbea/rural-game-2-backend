@@ -55,3 +55,14 @@ class ChallengeProvider(ABC):
             and a boolean indicating if the lobby should vote the performance
         """
         raise NotImplementedError("This method should be implemented by subclasses")
+    
+    @abstractmethod
+    def compute_award_from_votes(self, potential_prize: int, votes: list[int]) -> int:
+        """
+        Calculates the final points based on the ratings (0..10).
+
+        :param potential_prize: The maximum prize that can be awarded.
+        :param votes: List of integer votes (0 to 10).
+        :return: The calculated award points.
+        """
+        raise NotImplementedError("This method should be implemented by subclasses")

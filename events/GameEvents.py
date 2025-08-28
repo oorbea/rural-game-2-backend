@@ -5,7 +5,7 @@ from marshmallow import ValidationError
 from controllers.GameController import GameController
 from enums.TurnType import TurnTypeEnum
 from helpers.PlayerInfo import PlayerInfo
-from schemas import CodeAndDescriptionSchema, CodeAndTurnTypeSchema, PlayerInfoSchema, CodeAndUsernameSchema, CodeAndPlayerSchema, SkipOrCompleteTurnSchema, UpdatePlayerSchema
+from schemas import CodeAndDescriptionSchema, CodeAndTurnTypeSchema, PlayerInfoSchema, CodeAndUsernameSchema, CodeAndPlayerSchema, SkipOrCompleteTurnSchema, UpdatePlayerSchema, VoteSchema
 import base64
 import re
 import time
@@ -478,7 +478,7 @@ class GameEvents(Namespace):
                 'title': title,
                 'new_score': score
             }, room=code)
-            
+
             return {'ok': True}
         
         except ValueError as e:
@@ -486,3 +486,66 @@ class GameEvents(Namespace):
         except Exception as e:
             self.emit('error', {'message': f'An error occurred while completing the turn.\n{str(e)}'}, room=code)
             return {'ok': False, 'error': f'An error occurred while completing the turn.\n{str(e)}'}
+        
+    def on_vote(self, data:dict):
+        """Vote for the performance of the last completed turn."""
+        try:
+            code = data['code'] = str(data['code'])
+            voter = data['player_name']
+            vote = data['vote']
+        except KeyError:
+            return {'ok': False, 'error': 'Lobby code, player username and vote are required to vote.'}
+
+        schema = VoteSchema()
+        try:
+            data = schema.load(data)
+        except ValidationError as e:
+            return {'ok': False, 'error': str(e)}
+
+        gc: GameController = current_app.extensions['game_controller']
+
+        try:
+            result = gc.cast_vote(code, voter, int(vote))
+
+            self.emit('vote_progress', {
+                'turn_type': result.get('turn_type'),
+                'title': result.get('title'),
+                'player': result.get('player'),
+                'voter': voter,
+                'voters': result.get('voters', []),
+                'received': result.get('received', result.get('votes', 0)),
+                'remaining': result.get('remaining', 0)
+            }, room=code)
+
+            if result.get("completed"):
+                self.emit('turn_completed', {
+                    'player': result['player'],
+                    'turn_type': result['turn_type'],
+                    'title': result['title'],
+                    'new_score': result['new_score']
+                }, room=code)
+
+                return {
+                    'ok': True,
+                    'completed': True,
+                    'player': result['player'],
+                    'average_vote': result['average_vote'],
+                    'awarded': result['awarded'],
+                    'new_score': result['new_score'],
+                    'votes': result['votes'],
+                    'voters': result.get('voters', [])
+                }
+
+            return {
+                'ok': True,
+                'completed': False,
+                'received': result['received'],
+                'remaining': result['remaining'],
+                'voters': result.get('voters', [])
+            }
+
+        except ValueError as e:
+            return {'ok': False, 'error': str(e)}
+        except Exception as e:
+            self.emit('error', {'message': f'An error occurred while voting.\n{str(e)}'}, room=code)
+            return {'ok': False, 'error': f'An error occurred while voting.\n{str(e)}'}

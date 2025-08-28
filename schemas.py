@@ -153,6 +153,12 @@ class SkipOrCompleteTurnSchema(Schema):
     turn_type = fields.String(required=True, validate=validate.OneOf([member.value for member in TurnTypeEnum]))
     title = fields.String(required=True, validate=validate.Length(min=1, max=100))
 
+class VoteSchema(Schema):
+    """Schema for validating vote data."""
+    code = fields.String(required=True, validate=validate.Length(equal=4))
+    player_name = fields.String(required=True)
+    vote = fields.Integer(required=True, validate=validate.Range(min=0, max=10))
+
 class UpdatePlayerSchema(Schema):
     """Schema for validating player updates."""
     current_username = fields.String(required=True)

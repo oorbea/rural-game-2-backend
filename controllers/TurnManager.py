@@ -543,3 +543,9 @@ class TurnManager(ChallengeProvider):
             
             case _:
                 raise ValueError(f"Unsupported turn type: {turn_type}. Supported types are: {(e.value for e in TurnTypeEnum)}")
+            
+    def compute_award_from_votes(self, potential_prize: int, votes: list[int]) -> int:
+        if not votes:
+            return 0
+        avg = sum(votes) / len(votes)
+        return int(round(potential_prize * (avg / 10.0)))

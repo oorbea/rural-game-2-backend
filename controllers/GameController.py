@@ -9,7 +9,7 @@ import os
 import random
 import string
 
-from datetime import datetime, date
+from datetime import datetime
 from typing import Any, Iterable
 import redis
 
@@ -20,7 +20,6 @@ from helpers.IChallengeProvider import ChallengeProvider
 from helpers.IPlayerManager import PlayerManager
 from helpers.PlayerInfo import PlayerInfo
 from helpers.PlayerState import PlayerState
-from models.Challenge import Challenge
 
 class GameController:
     """Controller responsible for managing game lobbies and state.
@@ -33,6 +32,9 @@ class GameController:
     PLAYER_STATE_TEMPLATE = "lobby:{code}:player:{username}"
     LOBBY_USER_TEMPLATE = "lobby:{code}:user:{username}"
     ACTIVE_LOBBIES_SET = "lobbies:active"
+    VOTE_SESSION_KEY_TEMPLATE = "lobby:{code}:vote:session"
+    VOTE_VOTES_KEY_TEMPLATE = "lobby:{code}:vote:votes"
+
 
     def __init__(self, redis_client: redis.Redis, challenge_provider: ChallengeProvider, player_manager: PlayerManager) -> None:
         self.redis = redis_client
@@ -129,26 +131,28 @@ class GameController:
                 except redis.WatchError:
                     continue
 
-
-
     def end_lobby(self, code: str) -> None:
-        """Borra también las entradas per-lobby y sus fotos."""
+        """End a lobby and clean up all associated state."""
         self.redis.srem(self.ACTIVE_LOBBIES_SET, code)
         lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
         players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
         player_names = self.redis.lrange(players_list_key, 0, -1)
 
-        # borrar estados y datos per-lobby (incluye profile_pic en disco)
+        vote_sess_key = self.VOTE_SESSION_KEY_TEMPLATE.format(code=code)
+        vote_votes_key = self.VOTE_VOTES_KEY_TEMPLATE.format(code=code)
+        try:
+            self.redis.delete(vote_sess_key)
+            self.redis.delete(vote_votes_key)
+        except Exception:
+            pass
+
         for name in player_names:
-            # estado dinámico
             state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=name)
             self.redis.delete(state_key)
 
-            # datos per-lobby + foto
             lobby_user_key = self.LOBBY_USER_TEMPLATE.format(code=code, username=name)
             rel_path = self.redis.hget(lobby_user_key, "profile_pic")
             self.redis.delete(lobby_user_key)
-            # intentar borrar el archivo
             try:
                 if rel_path:
                     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -264,10 +268,11 @@ class GameController:
         turn_type = TurnTypeEnum(turn_type) if isinstance(turn_type, str) else turn_type
         prize, voting = self.challenge_provider.complete_turn(code, player, turn_type, title)
         if voting:
-            return prize, voting
+            self._begin_vote_session(code, player, turn_type, title, int(prize))
+            return int(prize), True
         else:
-            new_score = self.update_score(code, player, prize)
-            return new_score, voting
+            new_score = self.update_score(code, player, int(prize))
+            return new_score, False
 
     def update_score(self, code: str, username: str, delta: int) -> int:
         """Adjust a player's score by a delta.
@@ -461,6 +466,117 @@ class GameController:
         current_turn_index = current_turn % player_count
         player:str = self.redis.lindex(players_list_key, current_turn_index)
         return player
+    
+    def cast_vote(self, code: str, voter: str, vote_value: int) -> dict:
+        """
+        Registers a vote (0..10) for the active voting session.
+        Closes the session when all eligible players have voted and assigns the final score.
+        Returns a dict with progress or with the final summary if the session is closed.
+
+        :param code: lobby code
+        :param voter: username of the player casting the vote
+        :param vote_value: integer vote value between 0 and 10
+        :returns: a dictionary with voting progress or final results
+        """
+        if not self.redis.sismember(self.ACTIVE_LOBBIES_SET, code):
+            raise ValueError(f"Lobby {code} does not exist or is not active")
+
+        session_key = self.VOTE_SESSION_KEY_TEMPLATE.format(code=code)
+        votes_key = self.VOTE_VOTES_KEY_TEMPLATE.format(code=code)
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+
+        sess = self.redis.hgetall(session_key)
+        if not sess or str(sess.get("status")) != "open":
+            raise ValueError("No active voting session")
+
+        performer = sess.get("player")
+        turn_type = sess.get("turn_type")
+        title = sess.get("title")
+        try:
+            potential_prize = int(sess.get("prize", 0))
+        except (TypeError, ValueError):
+            potential_prize = 0
+
+        current_players:list[str] = self.redis.lrange(players_list_key, 0, -1)
+        if voter not in current_players:
+            raise ValueError("Voter is not in this lobby")
+        if voter == performer:
+            raise ValueError("Performer cannot vote")
+
+        if not (0 <= int(vote_value) <= 10):
+            raise ValueError("Vote must be between 0 and 10")
+
+        with self.redis.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(votes_key)
+                    if pipe.hexists(votes_key, voter):
+                        pipe.unwatch()
+                        raise ValueError("You have already voted")
+                    pipe.multi()
+                    pipe.hset(votes_key, voter, int(vote_value))
+                    pipe.execute()
+                    break
+                except redis.WatchError:
+                    continue
+
+        votes_map = self.redis.hgetall(votes_key) or {}
+        votes = [int(v) for v in votes_map.values()]
+        voters_list = list(votes_map.keys())
+
+        eligibles_now = [p for p in current_players if p != performer]
+        expected_now = len(eligibles_now)
+        received = len(votes)
+        remaining = max(0, expected_now - received)
+
+        if expected_now > 0 and received < expected_now:
+            return {
+                "completed": False,
+                "player": performer,
+                "turn_type": turn_type,
+                "title": title,
+                "received": received,
+                "remaining": remaining,
+                "voters": voters_list,
+            }
+
+        if expected_now == 0:
+            avg = 10.0
+            awarded = potential_prize
+        else:
+            avg = (sum(votes) / max(1, len(votes))) if votes else 0.0
+            if hasattr(self.challenge_provider, "compute_award_from_votes"):
+                awarded = int(self.challenge_provider.compute_award_from_votes(potential_prize, votes))
+            else:
+                awarded = int(round(potential_prize * (avg / 10.0)))
+
+        new_total = self.update_score(code, performer, awarded)
+        try:
+            with self.redis.pipeline() as pipe:
+                pipe.delete(votes_key)
+                pipe.delete(session_key)
+                pipe.execute()
+        except Exception:
+            try:
+                self._hset_serialized(session_key, key="status", value="closed")
+            except Exception:
+                pass
+
+        return {
+            "completed": True,
+            "player": performer,
+            "turn_type": turn_type,
+            "title": title,
+            "new_score": new_total,
+            "awarded": awarded,
+            "average_vote": round(avg, 2),
+            "votes": len(votes),
+            "received": received,
+            "remaining": 0,
+            "voters": voters_list,
+        }
+
+
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -550,3 +666,36 @@ class GameController:
         if key is None:
             raise ValueError("If using key/value, 'key' must be provided")
         return self.redis.hset(name, key, normalize_value(value))
+
+    def _begin_vote_session(self, code: str, player: str, turn_type: TurnTypeEnum, title: str, potential_prize: int) -> None:
+        """Creates/opens a voting session for the latest performance."""
+        if isinstance(turn_type, str):
+            turn_type = TurnTypeEnum(turn_type)
+
+        if not self.redis.sismember(self.ACTIVE_LOBBIES_SET, code):
+            raise ValueError(f"Lobby {code} does not exist or is not active")
+
+        session_key = self.VOTE_SESSION_KEY_TEMPLATE.format(code=code)
+        votes_key = self.VOTE_VOTES_KEY_TEMPLATE.format(code=code)
+
+        if self.redis.exists(session_key):
+            sess = self.redis.hgetall(session_key)
+            if sess and str(sess.get("status", "open")) == "open":
+                raise ValueError("A voting session is already active")
+
+        self.redis.delete(votes_key)
+
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+        current_players = [p for p in self.redis.lrange(players_list_key, 0, -1) if p != player]
+        expected = len(current_players)
+
+        mapping = {
+            "player": player,
+            "turn_type": turn_type.value,
+            "title": title,
+            "prize": int(potential_prize),
+            "created_at": datetime.now().astimezone().isoformat(),
+            "status": "open",
+            "expected": expected,
+        }
+        self._hset_serialized(session_key, mapping=mapping)
