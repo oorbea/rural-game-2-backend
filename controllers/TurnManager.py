@@ -1,3 +1,4 @@
+import json
 from random import choice, choices
 from sqlalchemy import or_
 from helpers.IChallengeProvider import ChallengeProvider
@@ -78,7 +79,7 @@ class TurnManager(ChallengeProvider):
 
         return Challenge.query.filter(*filters).all()
     
-    def _choose_challenge(self, player:str, challenges: list[Challenge], players_list: list[PlayerInfo]) -> Challenge|None:
+    def _choose_challenge(self, player: str, challenges: list[Challenge], players_list: list[PlayerInfo]) -> Challenge | None:
         """
         Choose a challenge and select required players based on the challenge requirements.
         
@@ -90,8 +91,12 @@ class TurnManager(ChallengeProvider):
         if not challenges:
             return None
         
-        player_info = next(filter(lambda x: hasattr(x, 'username') and x.username == player, players_list))
-        selected_players:list[PlayerInfo] = [player_info]
+        players_pool = list(players_list)
+
+        player_info = next(filter(lambda x: hasattr(x, 'username') and x.username == player, players_pool))
+        players_pool.remove(player_info)
+
+        selected_players: list[PlayerInfo] = [player_info]
 
         challenge = self._choice_with_probabilities(challenges)
         if not challenge:
@@ -100,18 +105,11 @@ class TurnManager(ChallengeProvider):
         needed_males = getattr(challenge, 'males', 0) or 0
         needed_females = getattr(challenge, 'females', 0) or 0
 
-        shuffle(players_list)
+        shuffle(players_pool)
 
         males_left = needed_males
         females_left = needed_females
-
-        gender = getattr(player_info, 'gender', None)
-        gender_value = getattr(gender, 'value', gender)
-        if gender_value == 'male': males_left -= 1
-        else: females_left -= 1
-
-        for p in players_list:
-
+        for p in players_pool:
             gender = getattr(p, 'gender', None)
             gender_value = getattr(gender, 'value', gender)
             if not males_left and not females_left:
@@ -127,8 +125,18 @@ class TurnManager(ChallengeProvider):
                     females_left -= 1
         
         shuffle(selected_players)
-        challenge.description = RestrictionAdapter.place_players(challenge.description, selected_players, player)
+
+        new_desc, assigned = RestrictionAdapter.place_and_map(challenge.description, selected_players, player)
+        challenge.description = new_desc
+
+        try:
+            challenge._assigned_map = assigned
+            challenge._teams = []
+        except Exception:
+            pass
+
         return challenge
+
     
     def _get_valid_group_challenges(self, code: str, restrictions: dict, player_name: str) -> list[GroupChallenge]:
         """Get valid group challenges based on lobby composition and player attributes."""
@@ -154,7 +162,7 @@ class TurnManager(ChallengeProvider):
 
         return GroupChallenge.query.filter(*filters).all()
     
-    def _choose_group_challenge(self, player:str, challenges: list[GroupChallenge], players_list: list[PlayerInfo]) -> GroupChallenge|None:
+    def _choose_group_challenge(self, player: str, challenges: list[GroupChallenge], players_list: list[PlayerInfo]) -> GroupChallenge | None:
         """
         Choose a group challenge and select required players based on the challenge requirements.
 
@@ -163,7 +171,6 @@ class TurnManager(ChallengeProvider):
         :param players_list: List of all players in the lobby.
         :return: Selected group challenge with players placed in the description, or None if no valid challenge found.
         """
-        print('RETRIVERED GROUP CHALLENGES:', challenges)
         if not challenges:
             return None
 
@@ -173,10 +180,14 @@ class TurnManager(ChallengeProvider):
 
         challenge_found = False
         challenge = None
-        selected_players: list[PlayerInfo] = []
+
+        all_players = list(players_list)
+
         while not challenge_found and attempts < max_attempts:
             if not challenges_list:
                 break
+
+            selected_players: list[PlayerInfo] = []
 
             challenge = self._choice_with_probabilities(challenges_list)
 
@@ -185,15 +196,13 @@ class TurnManager(ChallengeProvider):
             needed_females = getattr(challenge, 'females', 0) or 0
 
             valid_players: list[PlayerInfo] = []
-            for p in players_list:
+            for p in all_players:
                 if not hasattr(p, 'username'):
                     continue
                 elif self._valid_player(p, challenge):
                     valid_players.append(p)
 
-            print('VALID PLAYERS FOR CHALLENGE', challenge.title, ':', valid_players)
             if player_quantity > len(valid_players):
-                print(f"Not enough valid players for challenge '{challenge.title}': needed {player_quantity}, have {len(valid_players) + 1}")
                 challenges_list.remove(challenge)
                 attempts += 1
                 continue
@@ -201,6 +210,7 @@ class TurnManager(ChallengeProvider):
             shuffle(valid_players)
             males_left = needed_males
             females_left = needed_females
+
             for p in valid_players:
                 if len(selected_players) >= player_quantity:
                     challenge_found = True
@@ -225,13 +235,22 @@ class TurnManager(ChallengeProvider):
                 else:
                     challenges_list.remove(challenge)
                     attempts += 1
+                    continue
 
-        if challenge_found and challenge:
-            shuffle(selected_players)
-            challenge.description = RestrictionAdapter.place_players(challenge.description, selected_players, player)
-            return challenge
-        
+            if challenge_found and challenge:
+                shuffle(selected_players)
+                new_desc, assigned = RestrictionAdapter.place_and_map(challenge.description, selected_players, player)
+                challenge.description = new_desc
+                teams = RestrictionAdapter.build_teams_from_assigned(new_desc, assigned)
+                try:
+                    challenge._assigned_map = assigned
+                    challenge._teams = teams
+                except Exception:
+                    pass
+                return challenge
+
         return None
+
     
     def _get_valid_secret_missions(self, code: str, restrictions: dict, player_name: str) -> list[SecretMission]:
         """Get valid secret missions based on lobby composition and player attributes."""
@@ -255,7 +274,7 @@ class TurnManager(ChallengeProvider):
 
         return SecretMission.query.filter(*filters).all()
     
-    def _choose_secret_mission(self, player:str, challenges: list[SecretMission], players_list: list[PlayerInfo]) -> SecretMission|None:
+    def _choose_secret_mission(self, player: str, challenges: list[SecretMission], players_list: list[PlayerInfo]) -> SecretMission | None:
         """
         Choose a secret mission and select required players based on the secret mission requirements.
         
@@ -267,10 +286,12 @@ class TurnManager(ChallengeProvider):
         if not challenges:
             return None
         
-        player_info = next(filter(lambda x: hasattr(x, 'username') and x.username == player, players_list))
-        players_list.remove(player_info)
+        players_pool = list(players_list)
 
-        selected_players:list[PlayerInfo] = [player_info]
+        player_info = next(filter(lambda x: hasattr(x, 'username') and x.username == player, players_pool))
+        players_pool.remove(player_info)
+
+        selected_players: list[PlayerInfo] = [player_info]
 
         challenge = self._choice_with_probabilities(challenges)
         if not challenge:
@@ -279,18 +300,11 @@ class TurnManager(ChallengeProvider):
         needed_males = getattr(challenge, 'males', 0) or 0
         needed_females = getattr(challenge, 'females', 0) or 0
 
-        shuffle(players_list)
+        shuffle(players_pool)
 
         males_left = needed_males
         females_left = needed_females
-
-        gender = getattr(player_info, 'gender', None)
-        gender_value = getattr(gender, 'value', gender)
-        if gender_value == 'male': males_left -= 1
-        else: females_left -= 1
-
-        for p in players_list:
-
+        for p in players_pool:
             gender = getattr(p, 'gender', None)
             gender_value = getattr(gender, 'value', gender)
             if not males_left and not females_left:
@@ -306,7 +320,14 @@ class TurnManager(ChallengeProvider):
                     females_left -= 1
         
         shuffle(selected_players)
-        challenge.description = RestrictionAdapter.place_players(challenge.description, selected_players, player)
+
+        new_desc, assigned = RestrictionAdapter.place_and_map(challenge.description, selected_players, player)
+        challenge.description = new_desc
+        try:
+            challenge._assigned_map = assigned
+            challenge._teams = []
+        except Exception:
+            pass
         return challenge
     
     def _get_valid_target_challenges(self, restrictions: dict, players: list[PlayerInfo]) -> list[TargetChallenge]:
@@ -382,7 +403,7 @@ class TurnManager(ChallengeProvider):
             challenge.description = RestrictionAdapter.possible_target_players(challenge, valid_players, players_list)
             return challenge
     
-    def get_next_challenge(self, lobby_code: str, game_state: dict, type:TurnTypeEnum|str = TurnTypeEnum.CHALLENGE) -> dict:
+    def get_next_challenge(self, lobby_code: str, game_state: dict, type: TurnTypeEnum | str = TurnTypeEnum.CHALLENGE) -> dict:
         if not lobby_code:
             raise ValueError("Lobby code is required to get the next challenge")
         if not game_state:
@@ -393,41 +414,117 @@ class TurnManager(ChallengeProvider):
         if isinstance(type, str):
             type = TurnTypeEnum(type)
 
-        player_name:str = game_state['order'][game_state['lobby']['current_turn']]
+        player_name: str = game_state['order'][game_state['lobby']['current_turn']]
 
         match type:
             case TurnTypeEnum.CHALLENGE:
-                cha = self._choose_challenge(player_name, self._get_valid_challenges(lobby_code, game_state.get("restrictions", {"males": 0, "females": 0}), player_name), [self.gc.get_player_info(lobby_code, p) for p in game_state.get("order", [])])
+                cha = self._choose_challenge(
+                    player_name,
+                    self._get_valid_challenges(lobby_code, game_state.get("restrictions", {"males": 0, "females": 0}), player_name),
+                    [self.gc.get_player_info(lobby_code, p) for p in game_state.get("order", [])]
+                )
                 if cha:
+                    assigned = getattr(cha, "_assigned_map", {}) or {}
+                    others = [u for u in assigned.values() if isinstance(u, str) and not u.startswith("<no ")]
+                    participants = [player_name] + [u for u in others if u != player_name]
+                    teams = getattr(cha, "_teams", []) or []
+                    meta = {
+                        "turn_type": TurnTypeEnum.CHALLENGE.value,
+                        "title": cha.title,
+                        "performer": player_name,
+                        "group_challenge": False,
+                        "participants": json.dumps(participants),
+                        "teams": json.dumps(teams),
+                        "prize": cha.prize,
+                        "voting": cha.voting,
+                    }
+                    self.gc.set_current_challenge_meta(lobby_code, meta)
                     return cha.to_dict()
                 else:
                     raise ValueError("No valid challenges available for the current restrictions")
                 
             case TurnTypeEnum.GROUP_CHALLENGE:
-                gro = self._choose_group_challenge(player_name, self._get_valid_group_challenges(lobby_code, game_state.get("restrictions", {"males": 0, "females": 0}), player_name), [self.gc.get_player_info(lobby_code, p) for p in game_state.get("order", [])])
+                gro = self._choose_group_challenge(
+                    player_name,
+                    self._get_valid_group_challenges(lobby_code, game_state.get("restrictions", {"males": 0, "females": 0}), player_name),
+                    [self.gc.get_player_info(lobby_code, p) for p in game_state.get("order", [])]
+                )
                 if gro:
+                    assigned = getattr(gro, "_assigned_map", {}) or {}
+                    others = [u for u in assigned.values() if isinstance(u, str) and not u.startswith("<no ")]
+                    participants = [player_name] + [u for u in others if u != player_name]
+                    teams = getattr(gro, "_teams", []) or []
+                    meta = {
+                        "turn_type": TurnTypeEnum.GROUP_CHALLENGE.value,
+                        "title": gro.title,
+                        "performer": player_name,
+                        "group_challenge": True,
+                        "participants": json.dumps(participants),
+                        "teams": json.dumps(teams),
+                        "prize": gro.prize,
+                        "voting": gro.voting,
+                    }
+                    self.gc.set_current_challenge_meta(lobby_code, meta)
                     return gro.to_dict()
                 else:
                     raise ValueError("No valid group challenges available for the current restrictions")
                 
             case TurnTypeEnum.SECRET_MISSION:
-                secr = self._choose_secret_mission(player_name, self._get_valid_secret_missions(lobby_code, game_state.get("restrictions", {"males": 0, "females": 0}), player_name), [self.gc.get_player_info(lobby_code, p) for p in game_state.get("order", [])])
+                secr = self._choose_secret_mission(
+                    player_name,
+                    self._get_valid_secret_missions(lobby_code, game_state.get("restrictions", {"males": 0, "females": 0}), player_name),
+                    [self.gc.get_player_info(lobby_code, p) for p in game_state.get("order", [])]
+                )
                 if secr:
                     return secr.to_dict()
                 else:
                     raise ValueError("No valid secret missions available for the current restrictions")
                 
             case TurnTypeEnum.TARGET_CHALLENGE:
-                all_players:list[PlayerInfo] = [self.gc.get_player_info(lobby_code, p) for p in game_state.get("order", [])]
-                targ = self._choose_target_challenge(self._get_valid_target_challenges(game_state.get("restrictions", {"males": 0, "females": 0}), all_players), all_players)
+                all_players: list[PlayerInfo] = [self.gc.get_player_info(lobby_code, p) for p in game_state.get("order", [])]
+                targ = self._choose_target_challenge(
+                    self._get_valid_target_challenges(game_state.get("restrictions", {"males": 0, "females": 0}), all_players),
+                    all_players
+                )
                 if targ:
+                    desc = targ.description or ""
+                    if getattr(targ, "group_challenge", False):
+                        valid_players = self._get_valid_players(all_players, targ)
+                        new_desc, candidates_by_slot, team_by_slot = RestrictionAdapter.build_candidates_by_slot(
+                            desc, valid_players, all_players, group=True
+                        )
+                        targ.description = new_desc
+                        meta = {
+                            "turn_type": TurnTypeEnum.TARGET_CHALLENGE.value,
+                            "title": targ.title,
+                            "performer": player_name,
+                            "group_challenge": True,
+                            "participants": json.dumps([]),
+                            "teams": json.dumps([]),
+                            "prize": targ.prize,
+                            "voting": targ.voting,
+                            "candidates_by_slot": json.dumps(candidates_by_slot),
+                            "team_by_slot": json.dumps(team_by_slot),
+                            "slots": json.dumps(RestrictionAdapter.resolve_slots_from_description(desc)),
+                        }
+                    else:
+                        meta = {
+                            "turn_type": TurnTypeEnum.TARGET_CHALLENGE.value,
+                            "title": targ.title,
+                            "performer": player_name,
+                            "group_challenge": False,
+                            "participants": json.dumps([player_name]),
+                            "teams": json.dumps([]),
+                            "prize": targ.prize,
+                            "voting": targ.voting,
+                        }
+                    self.gc.set_current_challenge_meta(lobby_code, meta)
                     return targ.to_dict()
                 else:
                     raise ValueError("No valid target challenges available for the current restrictions")
             
             case _:
                 raise ValueError(f"Unsupported turn type: {type}. Supported types are: {[e.value for e in TurnTypeEnum]}")
-
     
     def get_player_roles(self, lobby_code: str, players: list[str]) -> dict[str, str]:
         if not players:

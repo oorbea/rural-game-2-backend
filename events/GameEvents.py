@@ -1,3 +1,4 @@
+import json
 import os
 from flask import current_app
 from flask_socketio import Namespace, join_room, leave_room
@@ -5,7 +6,7 @@ from marshmallow import ValidationError
 from controllers.GameController import GameController
 from enums.TurnType import TurnTypeEnum
 from helpers.PlayerInfo import PlayerInfo
-from schemas import CodeAndDescriptionSchema, CodeAndTurnTypeSchema, PlayerInfoSchema, CodeAndUsernameSchema, CodeAndPlayerSchema, SkipOrCompleteTurnSchema, UpdatePlayerSchema, VoteSchema
+from schemas import CodeAndDescriptionSchema, CodeAndTurnTypeSchema, PlayerInfoSchema, CodeAndUsernameSchema, CodeAndPlayerSchema, SkipOrCompleteTurnSchema, UpdatePlayerSchema, VoteSchema, VoteTeamSchema
 import base64
 import re
 import time
@@ -346,22 +347,46 @@ class GameEvents(Namespace):
             challenge, player = gc.next_turn(code, turn_type)
 
             challenge['icon'] = self._challenge_pic_url(challenge.get('title', 'unknown_title_error'), turn_type)
-            
+
+            meta = gc.get_current_challenge_meta(code)
+            participants = []
+            teams = []
+            candidates_by_slot = None
+            try:
+                participants = json.loads(meta.get("participants", "[]"))
+            except Exception:
+                pass
+            try:
+                teams = json.loads(meta.get("teams", "[]"))
+            except Exception:
+                pass
+            try:
+                candidates_by_slot = json.loads(meta.get("candidates_by_slot", "null"))
+            except Exception:
+                candidates_by_slot = None
+
             if turn_type == TurnTypeEnum.SECRET_MISSION.value:
                 self.emit('following_turn', {
                         'turn_type': turn_type,
                         'challenge': None,
-                        'player': player
+                        'player': player,
+                        'participants': participants
                     }, room=code)
                 return {'ok': True, 'challenge': challenge, 'player': player, 'turn_type': turn_type}
 
-            else:
-                self.emit('following_turn', {
-                    'turn_type': turn_type,
-                    'challenge': challenge,
-                    'player': player
-                }, room=code)
-                return {'ok': True}
+            payload = {
+                'turn_type': turn_type,
+                'challenge': challenge,
+                'player': player,
+                'participants': participants
+            }
+            if teams:
+                payload['teams'] = teams
+            if candidates_by_slot is not None:
+                payload['candidates_by_slot'] = candidates_by_slot
+
+            self.emit('following_turn', payload, room=code)
+            return {'ok': True}
 
         except ValueError as e:
             return {'ok': False, 'error': str(e)}
@@ -385,13 +410,43 @@ class GameEvents(Namespace):
         
         gc: GameController = current_app.extensions['game_controller']
 
-        try:     
-            player = gc.get_current_turn_player(code) 
+        try:
+            player = gc.get_current_turn_player(code)
+
+            meta = gc.get_current_challenge_meta(code)
+            slots = json.loads(meta.get("slots", "[]")) if meta.get("slots") else []
+            team_by_slot = json.loads(meta.get("team_by_slot", "{}")) if meta.get("team_by_slot") else {}
+
+            from helpers.RestrictionAdapter import RestrictionAdapter
+            chosen = RestrictionAdapter.extract_chosen_from_description(description)
+            assigned = {}
+            for i, slot in enumerate(slots):
+                if i < len(chosen):
+                    assigned[slot] = chosen[i]
+
+            teams_map: dict[str, list[str]] = {}
+            for slot, username in assigned.items():
+                team_name = team_by_slot.get(slot)
+                if team_name:
+                    teams_map.setdefault(team_name, []).append(username)
+
+            teams = [{"name": name, "members": members} for name, members in sorted(teams_map.items(), key=lambda x: x[0])]
+            participants = list(dict.fromkeys(chosen))
+            if player not in participants:
+                participants = [player] + participants
+
+            new_meta = {
+                "participants": json.dumps(participants),
+                "teams": json.dumps(teams),
+            }
+            gc.set_current_challenge_meta(code, new_meta)
 
             self.emit('target_chosen', {
                 'turn_type': TurnTypeEnum.TARGET_CHALLENGE.value,
                 'description': description,
-                'player': player
+                'player': player,
+                'participants': participants,
+                'teams': teams
             }, room=code)
 
             return {'ok': True}
@@ -424,6 +479,17 @@ class GameEvents(Namespace):
         gc: GameController = current_app.extensions['game_controller']
 
         try:
+            meta = gc.get_current_challenge_meta(code)
+            try:
+                is_group = str(meta.get("group_challenge", "false")).lower() in ("1","true","t","yes","y")
+                turn_now = meta.get("turn_type")
+                if is_group and turn_now in (TurnTypeEnum.GROUP_CHALLENGE.value, TurnTypeEnum.TARGET_CHALLENGE.value):
+                    participants = json.loads(meta.get("participants", "[]")) if meta.get("participants") else []
+                    if player not in participants:
+                        return {'ok': False, 'error': 'Only participants of this group challenge can skip it.'}
+            except Exception:
+                pass
+
             new_score = gc.skip_turn(code, player, turn_type, title)
 
             self.emit('turn_skipped', {
@@ -460,8 +526,64 @@ class GameEvents(Namespace):
         gc: GameController = current_app.extensions['game_controller']
 
         try:
-            score, voting = gc.complete_turn(code, player, turn_type, title)
+            meta = gc.get_current_challenge_meta(code)
+            is_group = str(meta.get("group_challenge", "false")).lower() in ("1","true","t","yes","y")
+            turn_now = meta.get("turn_type")
+            title_now = meta.get("title", title)
+            prize = int(meta.get("prize", 0))
+            voting_flag = bool(json.loads(meta.get("voting"))) if meta.get("voting") is not None else False
+            participants = json.loads(meta.get("participants", "[]")) if meta.get("participants") else []
+            teams = json.loads(meta.get("teams", "[]")) if meta.get("teams") else []
 
+            if is_group and turn_now == TurnTypeEnum.GROUP_CHALLENGE.value and teams and len(teams) > 1:
+                info = gc.begin_team_vote(code, teams=teams, participants=participants, title=title_now, turn_type=TurnTypeEnum.GROUP_CHALLENGE)
+                self.emit('team_vote_started', {
+                    'turn_type': TurnTypeEnum.GROUP_CHALLENGE.value,
+                    'title': title_now,
+                    'teams': teams,
+                    'expected': info.get('expected', 0)
+                }, room=code)
+                return {'ok': True, 'team_vote': True}
+
+            if is_group and turn_now == TurnTypeEnum.TARGET_CHALLENGE.value and teams and len(teams) > 1:
+                info = gc.begin_team_vote(code, teams=teams, participants=participants, title=title_now, turn_type=TurnTypeEnum.TARGET_CHALLENGE)
+                self.emit('team_vote_started', {
+                    'turn_type': TurnTypeEnum.TARGET_CHALLENGE.value,
+                    'title': title_now,
+                    'teams': teams,
+                    'expected': info.get('expected', 0)
+                }, room=code)
+                return {'ok': True, 'team_vote': True}
+
+            if is_group and participants:
+                if voting_flag:
+                    gc.begin_vote_session(code,
+                        performer_label=player,
+                        turn_type=turn_now,
+                        title=title_now,
+                        potential_prize=prize,
+                        awardees=participants
+                    )
+                    self.emit('turn_completed_needs_voting', {
+                        'player': player,
+                        'turn_type': turn_now,
+                        'title': title_now,
+                        'potential_prize': prize,
+                        'participants': participants
+                    }, room=code)
+                    return {'ok': True, 'potential_prize': prize, 'voting': True}
+                else:
+                    totals = gc.award_points_to(code, participants, prize)
+                    self.emit('turn_completed', {
+                        'player': player,
+                        'turn_type': turn_now,
+                        'title': title_now,
+                        'new_scores': totals
+                    }, room=code)
+                    gc.clear_current_challenge_meta(code)
+                    return {'ok': True}
+
+            score, voting = gc.complete_turn(code, player, turn_type, title)
             if voting:
                 self.emit('turn_completed_needs_voting', {
                     'player': player,
@@ -469,7 +591,6 @@ class GameEvents(Namespace):
                     'title': title,
                     'potential_prize': score
                 }, room=code)
-
                 return {'ok': True, 'potential_prize': score, 'voting': voting}
 
             self.emit('turn_completed', {
@@ -478,7 +599,6 @@ class GameEvents(Namespace):
                 'title': title,
                 'new_score': score
             }, room=code)
-
             return {'ok': True}
         
         except ValueError as e:
@@ -549,3 +669,76 @@ class GameEvents(Namespace):
         except Exception as e:
             self.emit('error', {'message': f'An error occurred while voting.\n{str(e)}'}, room=code)
             return {'ok': False, 'error': f'An error occurred while voting.\n{str(e)}'}
+
+    def on_team_vote(self, data: dict):
+        """
+        Vote to decide the winning team.
+        """
+        try:
+            code = data['code'] = str(data['code'])
+            voter = data['player_name']
+            team = data['team']
+        except KeyError:
+            return {'ok': False, 'error': 'Lobby code, player username and team are required.'}
+        
+        schema = VoteTeamSchema()
+        try:
+            data = schema.load(data)
+        except ValidationError as e:
+            return {'ok': False, 'error': str(e)}
+
+        gc: GameController = current_app.extensions['game_controller']
+        try:
+            res = gc.cast_team_vote(code, voter, team)
+            if not res.get("completed"):
+                self.emit('team_vote_progress', {
+                    'voter': voter,
+                    'received': res.get('received', 0),
+                    'remaining': res.get('remaining', 0),
+                    'voters': res.get('voters', [])
+                }, room=code)
+                return {'ok': True, 'completed': False, 'received': res.get('received', 0), 'remaining': res.get('remaining', 0)}
+
+            winner = res['winner']
+            self.emit('team_vote_completed', {'winner': winner}, room=code)
+
+            meta = gc.get_current_challenge_meta(code)
+            voting_flag = bool(json.loads(meta.get("voting"))) if meta.get("voting") is not None else False
+            prize = int(meta.get("prize", 0))
+            title = meta.get("title")
+            turn_now = meta.get("turn_type")
+            teams = json.loads(meta.get("teams", "[]")) if meta.get("teams") else []
+            awardees = next((t['members'] for t in teams if t['name'] == winner), [])
+
+            if voting_flag:
+                gc.begin_vote_session(code,
+                    performer_label=winner,
+                    turn_type=turn_now,
+                    title=title,
+                    potential_prize=prize,
+                    awardees=awardees
+                )
+                self.emit('turn_completed_needs_voting', {
+                    'player': winner,
+                    'turn_type': turn_now,
+                    'title': title,
+                    'potential_prize': prize,
+                    'participants': awardees
+                }, room=code)
+                return {'ok': True, 'completed': True, 'winner': winner, 'voting': True, 'potential_prize': prize}
+
+            totals = gc.award_points_to(code, awardees, prize)
+            self.emit('turn_completed', {
+                'player': winner,
+                'turn_type': turn_now,
+                'title': title,
+                'new_scores': totals
+            }, room=code)
+            gc.clear_current_challenge_meta(code)
+            return {'ok': True, 'completed': True, 'winner': winner, 'voting': False}
+
+        except ValueError as e:
+            return {'ok': False, 'error': str(e)}
+        except Exception as e:
+            self.emit('error', {'message': f'An error occurred during team voting.\n{str(e)}'}, room=code)
+            return {'ok': False, 'error': f'An error occurred during team voting.\n{str(e)}'}

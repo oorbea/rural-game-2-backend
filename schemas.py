@@ -159,6 +159,12 @@ class VoteSchema(Schema):
     player_name = fields.String(required=True)
     vote = fields.Integer(required=True, validate=validate.Range(min=0, max=10))
 
+class VoteTeamSchema(Schema):
+    """Schema for validating vote data."""
+    code = fields.String(required=True, validate=validate.Length(equal=4))
+    player_name = fields.String(required=True)
+    team = fields.String(required=True)
+
 class UpdatePlayerSchema(Schema):
     """Schema for validating player updates."""
     current_username = fields.String(required=True)

@@ -34,6 +34,9 @@ class GameController:
     ACTIVE_LOBBIES_SET = "lobbies:active"
     VOTE_SESSION_KEY_TEMPLATE = "lobby:{code}:vote:session"
     VOTE_VOTES_KEY_TEMPLATE = "lobby:{code}:vote:votes"
+    CURRENT_CHALLENGE_KEY = "lobby:{code}:current_challenge"
+    TEAM_VOTE_SESSION_KEY_TEMPLATE = "lobby:{code}:team_vote:session"
+    TEAM_VOTE_VOTES_KEY_TEMPLATE = "lobby:{code}:team_vote:votes"
 
 
     def __init__(self, redis_client: redis.Redis, challenge_provider: ChallengeProvider, player_manager: PlayerManager) -> None:
@@ -169,6 +172,10 @@ class GameController:
 
         self.redis.delete(lobby_key)
         self.redis.delete(players_list_key)
+        self.redis.delete(self.CURRENT_CHALLENGE_KEY.format(code=code))
+        self.redis.delete(self.TEAM_VOTE_SESSION_KEY_TEMPLATE.format(code=code))
+        self.redis.delete(self.TEAM_VOTE_VOTES_KEY_TEMPLATE.format(code=code))
+
 
     # ------------------------------------------------------------------
     # Game state management
@@ -472,17 +479,13 @@ class GameController:
         player:str = self.redis.lindex(players_list_key, current_turn_index)
         return player
     
-    def cast_vote(self, code: str, voter: str, vote_value: int) -> dict:
-        """
-        Registers a vote (0..10) for the active voting session.
-        Closes the session when all eligible players have voted and assigns the final score.
-        Returns a dict with progress or with the final summary if the session is closed.
+    def award_points_to(self, code: str, awardees: list[str], delta: int) -> dict[str, int]:
+        totals = {}
+        for u in awardees:
+            totals[u] = self.update_score(code, u, delta)
+        return totals
 
-        :param code: lobby code
-        :param voter: username of the player casting the vote
-        :param vote_value: integer vote value between 0 and 10
-        :returns: a dictionary with voting progress or final results
-        """
+    def cast_vote(self, code: str, voter: str, vote_value: int) -> dict:
         if not self.redis.sismember(self.ACTIVE_LOBBIES_SET, code):
             raise ValueError(f"Lobby {code} does not exist or is not active")
 
@@ -494,19 +497,18 @@ class GameController:
         if not sess or str(sess.get("status")) != "open":
             raise ValueError("No active voting session")
 
-        performer = sess.get("player")
+        performer_label = sess.get("performer")
         turn_type = sess.get("turn_type")
         title = sess.get("title")
         try:
             potential_prize = int(sess.get("prize", 0))
         except (TypeError, ValueError):
             potential_prize = 0
+        awardees = json.loads(sess.get("awardees", "[]"))
 
         current_players:list[str] = self.redis.lrange(players_list_key, 0, -1)
         if voter not in current_players:
             raise ValueError("Voter is not in this lobby")
-        if voter == performer:
-            raise ValueError("Performer cannot vote")
 
         if not (0 <= int(vote_value) <= 10):
             raise ValueError("Vote must be between 0 and 10")
@@ -529,15 +531,19 @@ class GameController:
         votes = [int(v) for v in votes_map.values()]
         voters_list = list(votes_map.keys())
 
-        eligibles_now = [p for p in current_players if p != performer]
-        expected_now = len(eligibles_now)
+        connected = self._eligible_connected_players(code)
+        eligibles = [u for u in connected if u not in set(awardees)]
+        if not eligibles and set(connected) == set(awardees):
+            eligibles = connected
+
+        expected_now = len(eligibles)
         received = len(votes)
         remaining = max(0, expected_now - received)
 
         if expected_now > 0 and received < expected_now:
             return {
                 "completed": False,
-                "player": performer,
+                "player": performer_label,
                 "turn_type": turn_type,
                 "title": title,
                 "received": received,
@@ -555,7 +561,7 @@ class GameController:
             else:
                 awarded = int(round(potential_prize * (avg / 10.0)))
 
-        new_total = self.update_score(code, performer, awarded)
+        new_totals = self.award_points_to(code, awardees, awarded)
         try:
             with self.redis.pipeline() as pipe:
                 pipe.delete(votes_key)
@@ -569,10 +575,10 @@ class GameController:
 
         return {
             "completed": True,
-            "player": performer,
+            "player": performer_label,
             "turn_type": turn_type,
             "title": title,
-            "new_score": new_total,
+            "new_scores": new_totals,
             "awarded": awarded,
             "average_vote": round(avg, 2),
             "votes": len(votes),
@@ -580,7 +586,125 @@ class GameController:
             "remaining": 0,
             "voters": voters_list,
         }
+    
+    def begin_team_vote(self, code: str, *, teams: list[dict], participants: list[str], title: str, turn_type: TurnTypeEnum) -> dict:
+        """
+        Opens a team-vote session. Eligibles: connected players except participants,
+        unless the whole lobby participates, then everyone votes.
+        """
+        if isinstance(turn_type, str):
+            turn_type = TurnTypeEnum(turn_type)
 
+        session_key = self.TEAM_VOTE_SESSION_KEY_TEMPLATE.format(code=code)
+        votes_key = self.TEAM_VOTE_VOTES_KEY_TEMPLATE.format(code=code)
+
+        if self.redis.exists(session_key):
+            sess = self.redis.hgetall(session_key)
+            if sess and str(sess.get("status", "open")) == "open":
+                raise ValueError("A team voting session is already active")
+
+        self.redis.delete(votes_key)
+
+        connected = self._eligible_connected_players(code)
+        eligibles = [u for u in connected if u not in set(participants)]
+        if not eligibles and set(connected) == set(participants):
+            eligibles = connected
+
+        payload = {
+            "status": "open",
+            "title": title,
+            "turn_type": turn_type.value,
+            "teams": json.dumps(teams),
+            "participants": json.dumps(participants),
+            "expected": len(eligibles),
+            "created_at": datetime.now().astimezone().isoformat(),
+        }
+        self._hset_serialized(session_key, mapping=payload)
+        return {"expected": len(eligibles), "teams": teams}
+
+    def cast_team_vote(self, code: str, voter: str, team_name: str) -> dict:
+        session_key = self.TEAM_VOTE_SESSION_KEY_TEMPLATE.format(code=code)
+        votes_key = self.TEAM_VOTE_VOTES_KEY_TEMPLATE.format(code=code)
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+
+        sess = self.redis.hgetall(session_key)
+        if not sess or sess.get("status") != "open":
+            raise ValueError("No active team voting session")
+
+        teams = json.loads(sess.get("teams", "[]"))
+        valid_team_names = {t["name"] for t in teams}
+        if team_name not in valid_team_names:
+            raise ValueError("Invalid team")
+
+        current_players:list[str] = self.redis.lrange(players_list_key, 0, -1)
+        if voter not in current_players:
+            raise ValueError("Voter is not in this lobby")
+
+        with self.redis.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(votes_key)
+                    if pipe.hexists(votes_key, voter):
+                        pipe.unwatch()
+                        raise ValueError("You have already voted")
+                    pipe.multi()
+                    pipe.hset(votes_key, voter, team_name)
+                    pipe.execute()
+                    break
+                except redis.WatchError:
+                    continue
+
+        votes_map = self.redis.hgetall(votes_key) or {}
+        received = len(votes_map)
+        expected = int(sess.get("expected", 0))
+        remaining = max(0, expected - received)
+
+        if received < expected:
+            return {"completed": False, "received": received, "remaining": remaining, "voters": list(votes_map.keys())}
+
+        counts: dict[str, int] = {}
+        for choice in votes_map.values():
+            counts[choice] = counts.get(choice, 0) + 1
+        top_count = max(counts.values()) if counts else 0
+        candidates = [name for name, c in counts.items() if c == top_count]
+
+        if len(candidates) == 1:
+            winner = candidates[0]
+        else:
+            def team_avg_points(name: str) -> float:
+                members = next((t["members"] for t in teams if t["name"] == name), [])
+                vals = []
+                for u in members:
+                    st_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=u)
+                    try:
+                        pts = int(self.redis.hget(st_key, "points") or 0)
+                    except Exception:
+                        pts = 0
+                    vals.append(pts)
+                return (sum(vals) / len(vals)) if vals else 0.0
+
+            winner = min(candidates, key=team_avg_points)
+
+        try:
+            with self.redis.pipeline() as pipe:
+                pipe.delete(votes_key)
+                pipe.hset(session_key, mapping={"status": "closed", "winner": winner})
+        except Exception:
+            pass
+
+        return {"completed": True, "winner": winner}
+
+    def set_current_challenge_meta(self, code: str, meta: dict) -> None:
+        key = self.CURRENT_CHALLENGE_KEY.format(code=code)
+        self._hset_serialized(key, mapping=meta)
+
+    def get_current_challenge_meta(self, code: str) -> dict:
+        key = self.CURRENT_CHALLENGE_KEY.format(code=code)
+        return self.redis.hgetall(key) or {}
+
+    def clear_current_challenge_meta(self, code: str) -> None:
+        key = self.CURRENT_CHALLENGE_KEY.format(code=code)
+        self.redis.delete(key)
 
 
     # ------------------------------------------------------------------
@@ -672,13 +796,25 @@ class GameController:
             raise ValueError("If using key/value, 'key' must be provided")
         return self.redis.hset(name, key, normalize_value(value))
 
-    def _begin_vote_session(self, code: str, player: str, turn_type: TurnTypeEnum, title: str, potential_prize: int) -> None:
-        """Creates/opens a voting session for the latest performance."""
+    def _eligible_connected_players(self, code: str) -> list[str]:
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+        names = self.redis.lrange(players_list_key, 0, -1)
+        result = []
+        for n in names:
+            state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=n)
+            raw = self.redis.hget(state_key, "connected")
+            connected = True if raw is None else bool(json.loads(raw) if isinstance(raw, str) else raw)
+            if connected:
+                result.append(n)
+        return result
+
+    def begin_vote_session(self, code: str, *, performer_label: str, turn_type: TurnTypeEnum, title: str, potential_prize: int, awardees: list[str]) -> None:
+        """
+        Opens a performance voting session. Awardees receive the prize (possibly scaled).
+        Eligibles: connected players except awardees; if no one remains and the whole lobby participates, then everyone votes.
+        """
         if isinstance(turn_type, str):
             turn_type = TurnTypeEnum(turn_type)
-
-        if not self.redis.sismember(self.ACTIVE_LOBBIES_SET, code):
-            raise ValueError(f"Lobby {code} does not exist or is not active")
 
         session_key = self.VOTE_SESSION_KEY_TEMPLATE.format(code=code)
         votes_key = self.VOTE_VOTES_KEY_TEMPLATE.format(code=code)
@@ -690,17 +826,19 @@ class GameController:
 
         self.redis.delete(votes_key)
 
-        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
-        current_players = [p for p in self.redis.lrange(players_list_key, 0, -1) if p != player]
-        expected = len(current_players)
+        connected = self._eligible_connected_players(code)
+        eligibles = [u for u in connected if u not in set(awardees)]
+        if not eligibles and set(connected) == set(awardees):
+            eligibles = connected
 
         mapping = {
-            "player": player,
+            "performer": performer_label,
             "turn_type": turn_type.value,
             "title": title,
             "prize": int(potential_prize),
+            "awardees": json.dumps(list(awardees)),
             "created_at": datetime.now().astimezone().isoformat(),
             "status": "open",
-            "expected": expected,
+            "expected": len(eligibles),
         }
         self._hset_serialized(session_key, mapping=mapping)
