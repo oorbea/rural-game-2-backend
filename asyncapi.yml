@@ -120,12 +120,122 @@ channels:
       x-ack:
         description: |
           Ack varies by turn type:
-            - challenge, group_challenge => { ok: true }
-            - secret_mission, target_challenge => { ok: true, challenge: {...} }
+            - secret_mission_type => { ok: true, challenge: {...}, player, turn_type }
+            - other types => { ok: true }
         oneOf:
           - $ref: '#/components/schemas/AckOkOnly'
           - $ref: '#/components/schemas/AckNextTurnChallengeSuccess'
           - $ref: '#/components/schemas/AckError'
+
+  choose_target:
+    description: Client finalizes the target selection for a target challenge.
+    publish:
+      operationId: chooseTarget
+      summary: Choose the participants (fills the description) for a target challenge.
+      message:
+        $ref: '#/components/messages/ChooseTarget'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckOkOnly'
+          - $ref: '#/components/schemas/AckError'
+
+  skip_turn:
+    description: Client requests to skip the current challenge (if allowed) and apply punishment.
+    publish:
+      operationId: skipTurn
+      summary: Skip the current turn (cannot skip secret missions).
+      message:
+        $ref: '#/components/messages/SkipOrCompleteTurn'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckOkOnly'
+          - $ref: '#/components/schemas/AckError'
+
+  complete_turn:
+    description: Client confirms the challenge was completed.
+    publish:
+      operationId: completeTurn
+      summary: Complete the current turn; may open a voting session.
+      message:
+        $ref: '#/components/messages/SkipOrCompleteTurn'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckOkOnly'
+          - $ref: '#/components/schemas/AckCompleteTurnVoting'
+          - $ref: '#/components/schemas/AckError'
+
+  vote:
+    description: Client submits a vote for the last performance if a voting session is open.
+    publish:
+      operationId: vote
+      summary: Submit a 0..10 score. Performer cannot vote; each voter votes once.
+      message:
+        $ref: '#/components/messages/Vote'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckVoteProgress'
+          - $ref: '#/components/schemas/AckVoteCompleted'
+          - $ref: '#/components/schemas/AckError'
+
+  # ---- Server to client notifications ----
+
+  next_turn_type:
+    description: Broadcast emitted right before computing the next challenge.
+    subscribe:
+      operationId: nextTurnType
+      summary: Receive the next turn type to be processed.
+      message:
+        $ref: '#/components/messages/NextTurnType'
+
+  following_turn:
+    description: Broadcast with the next turn info. Payload depends on turn type.
+    subscribe:
+      operationId: followingTurn
+      summary: Receive the upcoming turn data (type, player, and optionally challenge).
+      message:
+        oneOf:
+          - $ref: '#/components/messages/FollowingTurnWithChallenge'
+          - $ref: '#/components/messages/FollowingTurnWithoutChallenge'
+
+  target_chosen:
+    description: Broadcast after target selection is submitted.
+    subscribe:
+      operationId: targetChosen
+      summary: Final target challenge description for the current performer.
+      message:
+        $ref: '#/components/messages/TargetChosen'
+
+  turn_skipped:
+    description: Broadcast when a turn is skipped and punishment is applied.
+    subscribe:
+      operationId: turnSkipped
+      summary: Notifies the deduction applied to the performer.
+      message:
+        $ref: '#/components/messages/TurnSkipped'
+
+  turn_completed_needs_voting:
+    description: Broadcast when a completed turn requires voting.
+    subscribe:
+      operationId: turnCompletedNeedsVoting
+      summary: Notifies the lobby to start voting for the performance.
+      message:
+        $ref: '#/components/messages/TurnCompletedNeedsVoting'
+
+  vote_progress:
+    description: Broadcast after each vote, showing who has voted so far.
+    subscribe:
+      operationId: voteProgress
+      summary: Real-time voting progress (voter list, counts).
+      message:
+        $ref: '#/components/messages/VoteProgress'
+
+  turn_completed:
+    description: Broadcast when a turn completion is finalized (no voting or voting closed).
+    subscribe:
+      operationId: turnCompleted
+      summary: Notifies the final score for the performer.
+      message:
+        $ref: '#/components/messages/TurnCompleted'
 
   player_joined:
     description: Notification sent when a player joins a lobby.
@@ -167,16 +277,6 @@ channels:
       message:
         $ref: '#/components/messages/ProfilePictureUpdated'
 
-  following_turn:
-    description: Broadcast with the next turn info. Payload depends on turn type.
-    subscribe:
-      operationId: followingTurn
-      summary: Receive the upcoming turn data (type, player, and optionally challenge).
-      message:
-        oneOf:
-          - $ref: '#/components/messages/FollowingTurnWithChallenge'
-          - $ref: '#/components/messages/FollowingTurnWithoutChallenge'
-
   error:
     description: Error notifications related to lobby or game operations.
     subscribe:
@@ -197,6 +297,14 @@ components:
         properties:
           player:
             $ref: '#/components/schemas/PlayerInfo'
+        examples:
+          - player:
+              username: Alice
+              drinking: true
+              smoking: false
+              partnered: true
+              virgin: false
+              gender: male
 
     JoinLobby:
       name: JoinLobby
@@ -210,6 +318,15 @@ components:
             $ref: '#/components/schemas/LobbyCode'
           player:
             $ref: '#/components/schemas/PlayerInfo'
+        examples:
+          - code: '1234'
+            player:
+              username: Bob
+              drinking: false
+              smoking: false
+              partnered: false
+              virgin: true
+              gender: female
 
     LeaveLobby:
       name: LeaveLobby
@@ -224,6 +341,9 @@ components:
           player_name:
             type: string
             description: Username of the player leaving.
+        examples:
+          - code: '1234'
+            player_name: Bob
 
     StartGame:
       name: StartGame
@@ -238,6 +358,9 @@ components:
           player_name:
             type: string
             description: Host username who is starting the game.
+        examples:
+          - code: '1234'
+            player_name: Alice
 
     UpdatePlayer:
       name: UpdatePlayer
@@ -263,6 +386,11 @@ components:
             type: boolean
           gender:
             $ref: '#/components/schemas/GenderEnum'
+        examples:
+          - code: '1234'
+            current_username: Bob
+            new_username: Bobby
+            smoking: true
 
     UpdateProfilePicture:
       name: UpdateProfilePicture
@@ -283,6 +411,9 @@ components:
             $ref: '#/components/schemas/LobbyCode'
           player_name:
             type: string
+        examples:
+          - code: '1234'
+            player_name: Alice
 
     NextTurn:
       name: NextTurn
@@ -296,6 +427,211 @@ components:
             $ref: '#/components/schemas/LobbyCode'
           turn_type:
             $ref: '#/components/schemas/TurnTypeEnum'
+        examples:
+          - code: '1234'
+            turn_type: challenge_type
+
+    NextTurnType:
+      name: NextTurnType
+      title: Next Turn Type
+      summary: Broadcast announcing the next turn type.
+      payload:
+        type: object
+        required: [turn_type]
+        properties:
+          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
+        examples:
+          - turn_type: group_challenge_type
+
+    FollowingTurnWithChallenge:
+      name: FollowingTurnWithChallenge
+      title: Following Turn (with challenge)
+      summary: Broadcast for challenge/group_challenge/target_challenge turns.
+      payload:
+        type: object
+        required: [turn_type, challenge, player]
+        properties:
+          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
+          challenge: { $ref: '#/components/schemas/Challenge' }
+          player: { type: string }
+        examples:
+          - turn_type: challenge_type
+            player: Alice
+            challenge:
+              title: 'Balance Shot'
+              description: 'Alice vs {P1:gender=female} do a balance contest.'
+              icon: 'https://example.com/icon.png'
+
+    FollowingTurnWithoutChallenge:
+      name: FollowingTurnWithoutChallenge
+      title: Following Turn (without challenge)
+      summary: Broadcast for secret_mission turns.
+      payload:
+        type: object
+        required: [turn_type, player]
+        properties:
+          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
+          player: { type: string }
+        examples:
+          - turn_type: secret_mission_type
+            player: Bob
+
+    ChooseTarget:
+      name: ChooseTarget
+      title: Choose Target
+      summary: Client submits the resolved description for a target challenge.
+      payload:
+        type: object
+        required: [code, description]
+        properties:
+          code: { $ref: '#/components/schemas/LobbyCode' }
+          description:
+            type: string
+            description: Finalized description with chosen targets.
+        examples:
+          - code: '1234'
+            description: 'Kiss {Alice} or {Carol}'
+
+    TargetChosen:
+      name: TargetChosen
+      title: Target Chosen
+      summary: Broadcast confirming the final description for the target challenge.
+      payload:
+        type: object
+        required: [turn_type, description, player]
+        properties:
+          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
+          description: { type: string }
+          player: { type: string }
+        examples:
+          - turn_type: target_challenge_type
+            player: Alice
+            description: 'Kiss Bob and Carol'
+
+    SkipOrCompleteTurn:
+      name: SkipOrCompleteTurn
+      title: Skip/Complete Turn
+      summary: Client requests to skip or complete a challenge.
+      payload:
+        type: object
+        required: [code, player_name, turn_type, title]
+        properties:
+          code: { $ref: '#/components/schemas/LobbyCode' }
+          player_name: { type: string }
+          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
+          title:
+            type: string
+            description: Challenge title
+        examples:
+          - code: '1234'
+            player_name: Alice
+            turn_type: challenge_type
+            title: 'Balance Shot'
+
+    TurnSkipped:
+      name: TurnSkipped
+      title: Turn Skipped
+      summary: Broadcast that a turn was skipped and points were deducted.
+      payload:
+        type: object
+        required: [player, turn_type, title, new_score]
+        properties:
+          player: { type: string }
+          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
+          title: { type: string }
+          new_score: { type: integer }
+        examples:
+          - player: Alice
+            turn_type: group_challenge_type
+            title: 'Dance Off'
+            new_score: 18
+
+    TurnCompletedNeedsVoting:
+      name: TurnCompletedNeedsVoting
+      title: Turn Completed (needs voting)
+      summary: Broadcast to start voting for a performance.
+      payload:
+        type: object
+        required: [player, turn_type, title, potential_prize]
+        properties:
+          player: { type: string }
+          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
+          title: { type: string }
+          potential_prize: { type: integer }
+        examples:
+          - player: Bob
+            turn_type: challenge_type
+            title: 'Balance Shot'
+            potential_prize: 10
+
+    Vote:
+      name: Vote
+      title: Vote
+      summary: Client submits a vote (0..10) for the last performance.
+      payload:
+        type: object
+        required: [code, player_name, vote]
+        properties:
+          code: { $ref: '#/components/schemas/LobbyCode' }
+          player_name:
+            type: string
+            description: Voter username
+          vote:
+            type: integer
+            minimum: 0
+            maximum: 10
+        examples:
+          - code: '1234'
+            player_name: Carol
+            vote: 8
+
+    VoteProgress:
+      name: VoteProgress
+      title: Vote Progress
+      summary: Broadcast after each vote, includes voter list and counts.
+      payload:
+        type: object
+        required: [turn_type, title, player, voter, voters, received, remaining]
+        properties:
+          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
+          title: { type: string }
+          player:
+            type: string
+            description: Performer username
+          voter:
+            type: string
+            description: Username of the user who just voted
+          voters:
+            type: array
+            items: { type: string }
+          received: { type: integer }
+          remaining: { type: integer }
+        examples:
+          - turn_type: challenge_type
+            title: 'Balance Shot'
+            player: Alice
+            voter: Carol
+            voters: [Carol]
+            received: 1
+            remaining: 2
+
+    TurnCompleted:
+      name: TurnCompleted
+      title: Turn Completed
+      summary: Broadcast when a turn is finalized (no voting or voting closed).
+      payload:
+        type: object
+        required: [player, turn_type, title, new_score]
+        properties:
+          player: { type: string }
+          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
+          title: { type: string }
+          new_score: { type: integer }
+        examples:
+          - player: Alice
+            turn_type: challenge_type
+            title: 'Balance Shot'
+            new_score: 28
 
     PlayerJoined:
       name: PlayerJoined
@@ -311,6 +647,9 @@ components:
             type: string
             format: uri
             nullable: true
+        examples:
+          - player: Bob
+            profile_picture_url: 'https://example.com/p.png'
 
     PlayerLeft:
       name: PlayerLeft
@@ -324,6 +663,9 @@ components:
           host:
             type: string
             nullable: true
+        examples:
+          - player: Bob
+            host: Alice
 
     GameStarted:
       name: GameStarted
@@ -346,6 +688,10 @@ components:
             type: string
             format: uri
             nullable: true
+        examples:
+          - old_username: Bob
+            new_username: Bobby
+            profile_picture_url: 'https://example.com/p2.png'
 
     ProfilePictureUpdated:
       name: ProfilePictureUpdated
@@ -361,29 +707,10 @@ components:
             format: uri
             nullable: true
           removed: { type: boolean }
-
-    FollowingTurnWithChallenge:
-      name: FollowingTurnWithChallenge
-      title: Following Turn (with challenge)
-      summary: Broadcast for challenge/group_challenge turns.
-      payload:
-        type: object
-        required: [turn_type, challenge, player]
-        properties:
-          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
-          challenge: { $ref: '#/components/schemas/Challenge' }
-          player: { type: string }
-
-    FollowingTurnWithoutChallenge:
-      name: Following Turn (no challenge)
-      title: Following Turn (without challenge)
-      summary: Broadcast for secret_mission/target_challenge turns.
-      payload:
-        type: object
-        required: [turn_type, player]
-        properties:
-          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
-          player: { type: string }
+        examples:
+          - player: Alice
+            profile_picture_url: 'https://example.com/p3.png'
+            removed: false
 
     Error:
       name: Error
@@ -395,6 +722,8 @@ components:
           message:
             type: string
             description: Human-readable error message.
+        examples:
+          - message: 'Player already in lobby'
 
   schemas:
     # -----------------------
@@ -599,8 +928,48 @@ components:
 
     AckNextTurnChallengeSuccess:
       type: object
-      description: Returned only for secret_mission and target_challenge.
-      required: [ok, challenge]
+      description: Returned only for secret_mission_type.
+      required: [ok, challenge, player, turn_type]
       properties:
         ok: { type: boolean, const: true }
+        player: { type: string }
+        turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
         challenge: { $ref: '#/components/schemas/Challenge' }
+
+    AckCompleteTurnVoting:
+      type: object
+      description: Returned when a voting session is opened for the completed turn.
+      required: [ok, potential_prize, voting]
+      properties:
+        ok: { type: boolean, const: true }
+        potential_prize: { type: integer }
+        voting: { type: boolean, const: true }
+
+    AckVoteProgress:
+      type: object
+      description: Returned after a vote when voting is still in progress.
+      required: [ok, completed, received, remaining]
+      properties:
+        ok: { type: boolean, const: true }
+        completed: { type: boolean, const: false }
+        received: { type: integer }
+        remaining: { type: integer }
+        voters:
+          type: array
+          items: { type: string }
+
+    AckVoteCompleted:
+      type: object
+      description: Returned when the voting session closes and score is applied.
+      required: [ok, completed, player, average_vote, awarded, new_score, votes]
+      properties:
+        ok: { type: boolean, const: true }
+        completed: { type: boolean, const: true }
+        player: { type: string }
+        average_vote: { type: number }
+        awarded: { type: integer }
+        new_score: { type: integer }
+        votes: { type: integer }
+        voters:
+          type: array
+          items: { type: string }

@@ -1,7 +1,6 @@
 from random import choice, choices
-from flask import current_app
 from sqlalchemy import or_
-from controllers.GameController import ChallengeProvider
+from helpers.IChallengeProvider import ChallengeProvider
 from enums.TurnType import TurnTypeEnum
 from helpers.PlayerInfo import PlayerInfo
 from helpers.RestrictionAdapter import RestrictionAdapter
@@ -14,7 +13,7 @@ from random import shuffle
 
 class TurnManager(ChallengeProvider):
     _roles:list[Role] = []
-    gc = current_app.extensions['game_controller']
+    gc = None
 
     def __init__(self):
         def key_func(role: Role) -> tuple[int, int]:

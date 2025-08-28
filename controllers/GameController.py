@@ -41,6 +41,11 @@ class GameController:
         self.challenge_provider = challenge_provider
         self.player_manager = player_manager
 
+        try:
+            setattr(self.challenge_provider, 'gc', self)
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------
     # Lobby management
     # ------------------------------------------------------------------
