@@ -1,4 +1,4 @@
-from random import choice
+from random import choice, choices
 from flask import current_app
 from sqlalchemy import or_
 from controllers.GameController import ChallengeProvider
@@ -45,6 +45,13 @@ class TurnManager(ChallengeProvider):
             for i in range(remainder):
                 ponderated[fractional[i][0]] += 1
         return ponderated
+
+    def _choice_with_probabilities(self, items: list[Challenge|GroupChallenge|SecretMission|TargetChallenge]) -> Challenge|GroupChallenge|SecretMission|TargetChallenge|None:
+        if not items:
+            return None
+        
+        weights:list[float] = [item.probability for item in items]
+        return choices(items, weights=weights)[0]
     
     def _valid_player(self, p:PlayerInfo, challenge:Challenge|GroupChallenge|SecretMission|TargetChallenge) -> bool:
         return (challenge.drinking is False or p.drinking == challenge.drinking) and (challenge.smoking is False or p.smoking == challenge.smoking) and (challenge.partner_friendly is True or p.partnered == challenge.partner_friendly) and (not hasattr(challenge, 'sex') or challenge.sex is False or p.virgin != challenge.sex)
@@ -88,7 +95,7 @@ class TurnManager(ChallengeProvider):
 
         selected_players:list[PlayerInfo] = []
 
-        challenge = choice(challenges)
+        challenge = self._choice_with_probabilities(challenges)
         if not challenge:
             return None
         
@@ -166,7 +173,7 @@ class TurnManager(ChallengeProvider):
             if not challenges_list:
                 break
 
-            challenge = choice(challenges_list)
+            challenge = self._choice_with_probabilities(challenges_list)
 
             player_quantity = getattr(challenge, 'player_quantity', 0) or 0
             needed_males = getattr(challenge, 'males', 0) or 0
@@ -259,7 +266,7 @@ class TurnManager(ChallengeProvider):
 
         selected_players:list[PlayerInfo] = []
 
-        challenge = choice(challenges)
+        challenge = self._choice_with_probabilities(challenges)
         if not challenge:
             return None
         
@@ -346,7 +353,7 @@ class TurnManager(ChallengeProvider):
         max_attempts = len(challenges) * 2
         attempts = 0
         while not challenge_found and attempts < max_attempts:
-            challenge = choice(challenges)
+            challenge = self._choice_with_probabilities(challenges)
             valid_players = self._get_valid_players(players_list, challenge)
             if challenge.group_challenge:
                 if len(valid_players) < challenge.player_quantity:
