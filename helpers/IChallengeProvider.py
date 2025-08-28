@@ -41,3 +41,17 @@ class ChallengeProvider(ABC):
         :returns: the new total score for the player
         """
         raise NotImplementedError("This method should be implemented by subclasses")
+    
+    @abstractmethod
+    def complete_turn(self, lobby_code: str, player: str, turn_type: TurnTypeEnum, title: str) -> tuple[int, bool]:
+        """Mark the current turn as completed.
+        This method is called when a player completes their turn.
+
+        :param lobby_code: unique code identifying the lobby
+        :param player: player who is completing their turn
+        :param turn_type: the type of turn being completed
+        :param title: the title of the challenge being completed
+        :returns: a tuple containing the prize score for the player
+            and a boolean indicating if the lobby should vote the performance
+        """
+        raise NotImplementedError("This method should be implemented by subclasses")

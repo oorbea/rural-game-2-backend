@@ -5,7 +5,7 @@ from marshmallow import ValidationError
 from controllers.GameController import GameController
 from enums.TurnType import TurnTypeEnum
 from helpers.PlayerInfo import PlayerInfo
-from schemas import CodeAndDescriptionSchema, CodeAndTurnTypeSchema, PlayerInfoSchema, CodeAndUsernameSchema, CodeAndPlayerSchema, SkipTurnSchema, UpdatePlayerSchema
+from schemas import CodeAndDescriptionSchema, CodeAndTurnTypeSchema, PlayerInfoSchema, CodeAndUsernameSchema, CodeAndPlayerSchema, SkipOrCompleteTurnSchema, UpdatePlayerSchema
 import base64
 import re
 import time
@@ -410,9 +410,9 @@ class GameEvents(Namespace):
             turn_type = data['turn_type']
             title = data['title']
         except KeyError:
-            return {'ok': False, 'error': 'Lobby code, turn type and title of the challenge are required to skip a turn.'}
+            return {'ok': False, 'error': 'Lobby code, player username, turn type and title of the challenge are required to skip a turn.'}
         
-        schema = SkipTurnSchema()
+        schema = SkipOrCompleteTurnSchema()
         try:
             data = schema.load(data)
         except ValidationError as e:
@@ -440,3 +440,49 @@ class GameEvents(Namespace):
         except Exception as e:
             self.emit('error', {'message': f'An error occurred while skipping the turn.\n{str(e)}'}, room=code)
             return {'ok': False, 'error': f'An error occurred while skipping the turn.\n{str(e)}'}
+
+    def on_complete_turn(self, data:dict):
+        """The challenge for the current turn has been completed and the score should be updated."""
+        try:
+            code = data['code'] = str(data['code'])
+            player = data['player_name']
+            turn_type = data['turn_type']
+            title = data['title']
+        except KeyError:
+            return {'ok': False, 'error': 'Lobby code, player username turn type and title of the challenge are required to skip a turn.'}
+
+        schema = SkipOrCompleteTurnSchema()
+        try:
+            data = schema.load(data)
+        except ValidationError as e:
+            return {'ok': False, 'error': str(e)}
+
+        gc: GameController = current_app.extensions['game_controller']
+
+        try:
+            score, voting = gc.complete_turn(code, player, turn_type, title)
+
+            if voting:
+                self.emit('turn_completed_needs_voting', {
+                    'player': player,
+                    'turn_type': turn_type,
+                    'title': title,
+                    'potential_prize': score
+                }, room=code)
+
+                return {'ok': True, 'potential_prize': score, 'voting': voting}
+
+            self.emit('turn_completed', {
+                'player': player,
+                'turn_type': turn_type,
+                'title': title,
+                'new_score': score
+            }, room=code)
+            
+            return {'ok': True}
+        
+        except ValueError as e:
+            return {'ok': False, 'error': str(e)}
+        except Exception as e:
+            self.emit('error', {'message': f'An error occurred while completing the turn.\n{str(e)}'}, room=code)
+            return {'ok': False, 'error': f'An error occurred while completing the turn.\n{str(e)}'}

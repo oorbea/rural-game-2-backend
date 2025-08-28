@@ -245,6 +245,30 @@ class GameController:
         turn_type = TurnTypeEnum(turn_type) if isinstance(turn_type, str) else turn_type
         return self.challenge_provider.skip_turn(code, player, turn_type, title)
 
+    def complete_turn(self, code: str, player:str, turn_type: TurnTypeEnum|str, title: str) -> tuple[int, bool]:
+        """Mark the current turn as completed.
+
+        This method updates the player's score based on the challenge's prize if voting is not required. If voting is required, it returns the prize and a flag indicating that voting is needed without updating the score.
+
+        :param code: lobby code
+        :param player: player who is completing their turn
+        :param turn_type: the type of turn being completed
+        :param title: the title of the challenge being completed
+        :returns: a tuple containing the prize score for the player or the new total score if no voting is needed, and a boolean indicating if the lobby should vote the performance
+        """
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+        player_count:int = self.redis.llen(players_list_key)
+        if player_count == 0:
+            raise ValueError(f"Cannot complete turn; lobby {code} has no players")
+
+        turn_type = TurnTypeEnum(turn_type) if isinstance(turn_type, str) else turn_type
+        prize, voting = self.challenge_provider.complete_turn(code, player, turn_type, title)
+        if voting:
+            return prize, voting
+        else:
+            new_score = self.update_score(code, player, prize)
+            return new_score, voting
+
     def update_score(self, code: str, username: str, delta: int) -> int:
         """Adjust a player's score by a delta.
 

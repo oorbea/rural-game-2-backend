@@ -467,6 +467,10 @@ class TurnManager(ChallengeProvider):
         if not title:
             raise ValueError("Challenge title is required to skip a turn")
 
+        def points_to_deduct(punishment:float) -> int:
+            player_points:int = self.gc.get_player_state(lobby_code, player).points
+            return int(-abs(punishment/100) * player_points)
+
         match turn_type:
             case TurnTypeEnum.CHALLENGE:
                 challenge:Challenge = Challenge.query.get(title)
@@ -474,7 +478,7 @@ class TurnManager(ChallengeProvider):
                     raise ValueError(f"Challenge '{title}' not found to skip")
                 if challenge.skipping is None:
                     raise ValueError(f"Challenge '{title}' cannot be skipped")
-                return self.gc.update_score(lobby_code, player, -challenge.skipping)
+                return self.gc.update_score(lobby_code, player, points_to_deduct(challenge.skipping))
             
             case TurnTypeEnum.GROUP_CHALLENGE:
                 group_challenge:GroupChallenge = GroupChallenge.query.get(title)
@@ -482,7 +486,7 @@ class TurnManager(ChallengeProvider):
                     raise ValueError(f"Group challenge '{title}' not found to skip")
                 if group_challenge.skipping is None:
                     raise ValueError(f"Group challenge '{title}' cannot be skipped")
-                return self.gc.update_score(lobby_code, player, -group_challenge.skipping)
+                return self.gc.update_score(lobby_code, player, points_to_deduct(group_challenge.skipping))
             
             case TurnTypeEnum.SECRET_MISSION:
                 raise ValueError(f"Secret missions cannot be skipped")
@@ -493,7 +497,49 @@ class TurnManager(ChallengeProvider):
                     raise ValueError(f"Target challenge '{title}' not found to skip")
                 if target_challenge.skipping is None:
                     raise ValueError(f"Target challenge '{title}' cannot be skipped")
-                return self.gc.update_score(lobby_code, player, -target_challenge.skipping)
+                return self.gc.update_score(lobby_code, player, points_to_deduct(target_challenge.skipping))
+            
+            case _:
+                raise ValueError(f"Unsupported turn type: {turn_type}. Supported types are: {(e.value for e in TurnTypeEnum)}")
+            
+    def complete_turn(self, lobby_code: str, player:str, turn_type: TurnTypeEnum, title: str) -> tuple[int, bool]:
+        if not lobby_code:
+            raise ValueError("Lobby code is required to complete a turn")
+        if not player:
+            raise ValueError("Player is required to complete a turn")
+        if not turn_type:
+            raise ValueError("Turn type is required to complete a turn")
+        if not title:
+            raise ValueError("Challenge title is required to complete a turn")
+
+        match turn_type:
+            case TurnTypeEnum.CHALLENGE:
+                challenge:Challenge = Challenge.query.get(title)
+                if not challenge:
+                    raise ValueError(f"Challenge '{title}' not found to complete")
+
+                return challenge.prize, challenge.voting
+            
+            case TurnTypeEnum.GROUP_CHALLENGE:
+                group_challenge:GroupChallenge = GroupChallenge.query.get(title)
+                if not group_challenge:
+                    raise ValueError(f"Group challenge '{title}' not found to complete")
+                
+                return group_challenge.prize, group_challenge.voting
+            
+            case TurnTypeEnum.SECRET_MISSION:
+                secret_mission:SecretMission = SecretMission.query.get(title)
+                if not secret_mission:
+                    raise ValueError(f"Secret Mission '{title}' not found to complete")
+                
+                return secret_mission.prize, False
+            
+            case TurnTypeEnum.TARGET_CHALLENGE:
+                target_challenge:TargetChallenge = TargetChallenge.query.get(title)
+                if not target_challenge:
+                    raise ValueError(f"Target challenge '{title}' not found to complete")
+                
+                return target_challenge.prize, target_challenge.voting
             
             case _:
                 raise ValueError(f"Unsupported turn type: {turn_type}. Supported types are: {(e.value for e in TurnTypeEnum)}")
