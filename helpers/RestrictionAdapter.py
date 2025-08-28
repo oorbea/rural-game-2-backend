@@ -25,6 +25,17 @@ class RestrictionAdapter:
             return {}
         
     @staticmethod
+    def get_num_participants(desc: str) -> int:
+        if not desc:
+            return 0
+        try:
+            restrictions = RestrictionAdapter.get_restrictions(desc)
+            return len(restrictions)
+
+        except Exception as e:
+            print(f"Error counting group participants: {e}")
+
+    @staticmethod
     def get_num_males(desc: str) -> int:
         if not desc:
             return 0

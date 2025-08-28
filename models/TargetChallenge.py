@@ -16,7 +16,7 @@ class TargetChallengeDict(ChallengeDict):
     males: int|None = None
     females: int|None = None
 
-class TargetChallenge(db.Model):
+class TargetChallenge(db.Model): 
     __tablename__ = 'target_challenges'
     
     title = db.Column(db.String(100), primary_key=True)
@@ -32,6 +32,8 @@ class TargetChallenge(db.Model):
     prize = db.Column(db.Integer, nullable=False)
     males = db.Column(db.Integer, nullable=True, default=None)
     females = db.Column(db.Integer, nullable=True, default=None)
+    player_quantity = db.Column(db.Integer, nullable=False, default=1)
+    group_challenge = db.Column(db.Boolean, nullable=False, default=False)
     pass #TODO: Implement specific fields for TargetChallenge if needed
 
     def __repr__(self):
@@ -51,7 +53,9 @@ class TargetChallenge(db.Model):
             voting=self.voting,
             prize=self.prize,
             males=self.males,
-            females=self.females
+            females=self.females,
+            player_quantity = self.player_quantity,
+            group_challenge = self.group_challenge
         )
 
     def __len__(self) -> int:

@@ -10,7 +10,6 @@ class SecretMission(db.Model):
     title = db.Column(db.String(100), primary_key=True)
     description = db.Column(db.String(500), nullable=False)
     drinking = db.Column(db.Boolean, nullable=False, default=False)
-    sex = db.Column(db.Boolean, nullable=False, default=False)
     smoking = db.Column(db.Boolean, nullable=False, default=False)
     partner_friendly = db.Column(db.Boolean, nullable=False, default=True)
     probability = db.Column(db.Float, nullable=False, default=1.0)
@@ -29,7 +28,6 @@ class SecretMission(db.Model):
             title=self.title,
             description=self.description,
             drinking=self.drinking,
-            sex=self.sex,
             smoking=self.smoking,
             partner_friendly=self.partner_friendly,
             probability=self.probability,

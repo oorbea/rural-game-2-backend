@@ -47,6 +47,9 @@ HOST_NAME = os.getenv('HOST_NAME', f'http://localhost:{PORT}')
 ALLOWED_PICTURE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 PROFILE_PICTURES_DIR = "public/ProfilePictures"
 CHALLENGE_PICTURES_DIR = "public/ChallengePics"
+SECRET_MISSION_PICTURES_DIR = "public/SecretMissionPics"
+GROUPCHALLENGE_PICTURES_DIR = "public/GroupChallengePics"
+TARGET_PICTURES_DIR = "public/TargetPics"
 ROLE_PICTURES_DIR = "public/RolePics"
 CHALLENGE_PROVIDER_MODULE = os.getenv('CHALLENGE_PROVIDER_MODULE', DEFAULT_CHALLENGE_PROVIDER_MODULE)
 

@@ -41,14 +41,52 @@ class TitleChallengeSchema(Schema):
     
 class GroupChallengeSchema(ChallengeSchema):
     """Schema for validating group challenge data."""
-    pass
+    title = fields.String(required=True, validate=validate.Length(min=1, max=100))
+    description = fields.String(required=True, validate=validate.Length(min=1, max=500))
+    teams = fields.Integer(required=True)
+    player_quantity = fields.Integer(required=False, metadata={"description": "Number of players per group. Do not stablish this, it will be calculated automatically from the description."})
+    drinking = fields.Boolean(required=False, load_default=False)
+    sex = fields.Boolean(required=False, load_default=False)
+    smoking = fields.Boolean(required=False, load_default=False)
+    partner_friendly = fields.Boolean(required=False, load_default=True)
+    probability = fields.Float(required=False, load_default=1.0)
+    icon = fields.String(required=False, allow_none=True, load_default=None)
+    skipping = fields.Float(required=False, allow_none=True, load_default=None)
+    voting = fields.Boolean(required=False, load_default=False)
+    prize = fields.Integer(required=True)
+    males = fields.Integer(required=False, allow_none=True, metadata={"description": "Number of male players required. Do not stablish this, it will be calculated automatically from the description."})
+    females = fields.Integer(required=False, allow_none=True, metadata={"description": "Number of female players required. Do not stablish this, it will be calculated automatically from the description."})
+
+
+class GetGroupChallengeSchema(ChallengeSchema):
+    """Schema for validating group challenge data."""
+    class Meta:
+        unknown = RAISE
+    title = fields.String(required=False, validate=validate.Length(min=1, max=100))
+    description = fields.String(required=False, validate=validate.Length(min=1, max=500))
+    teams = fields.Integer(required=False)
+    player_quantity = fields.Integer(required=False)
+    drinking = fields.Boolean(required=False)
+    sex = fields.Boolean(required=False)
+    smoking = fields.Boolean(required=False)
+    partner_friendly = fields.Boolean(required=False)
+    probability = fields.Float(required=False)
+    icon = fields.String(required=False, allow_none=True)
+    skipping = fields.Float(required=False, allow_none=True)
+    voting = fields.Boolean(required=False)
+    prize = fields.Integer(required=False)
+    males = fields.Integer(required=False, allow_none=True)
+    females = fields.Integer(required=False, allow_none=True)
+
+class TitleGroupChallengeSchema(Schema):
+    """Schema for validating group challenge data."""
+    title = fields.String(required=True, validate=validate.Length(min=1, max=100))
 
 class SecretMissionSchema(Schema):
     """Schema for validating secret mission data."""
     title = fields.String(required=True, validate=validate.Length(min=1, max=100))
     description = fields.String(required=True, validate=validate.Length(min=1, max=500))
     drinking = fields.Boolean(required=False, load_default=False)
-    sex = fields.Boolean(required=False, load_default=False)
     smoking = fields.Boolean(required=False, load_default=False)
     partner_friendly = fields.Boolean(required=False, load_default=True)
     probability = fields.Float(required=False, load_default=1.0)
@@ -65,7 +103,6 @@ class GetSecretMissionSchema(Schema):
     title = fields.String(required=False, validate=validate.Length(min=1, max=100))
     description = fields.String(required=False, validate=validate.Length(min=1, max=500))
     drinking = fields.Boolean(required=False)
-    sex = fields.Boolean(required=False)
     smoking = fields.Boolean(required=False)
     partner_friendly = fields.Boolean(required=False)
     probability = fields.Float(required=False)
@@ -134,4 +171,46 @@ class GetRoleSchema(Schema):
 
 class TitleRoleSchema(Schema):
     """Schema for validating role data."""
+    title = fields.String(required=True, validate=validate.Length(min=1, max=100))
+
+class TargetChallengeSchema(Schema):
+    """Schema for validating target challenge data."""
+    title = fields.String(required=True, validate=validate.Length(min=1, max=100))
+    description = fields.String(required=True, validate=validate.Length(min=1, max=500))
+    drinking = fields.Boolean(required=False, load_default=False)
+    sex = fields.Boolean(required=False, load_default=False)
+    smoking = fields.Boolean(required=False, load_default=False)
+    partner_friendly = fields.Boolean(required=False, load_default=True)
+    probability = fields.Float(required=False, load_default=1.0)
+    icon = fields.String(required=False, allow_none=True, load_default=None)
+    skipping = fields.Float(required=False, allow_none=True, load_default=None)
+    voting = fields.Boolean(required=False, load_default=False)
+    prize = fields.Integer(required=True)
+    males = fields.Integer(required=False, allow_none=True, metadata={"description": "Number of male players required. Do not stablish this, it will be calculated automatically from the description."})
+    females = fields.Integer(required=False, allow_none=True, metadata={"description": "Number of female players required. Do not stablish this, it will be calculated automatically from the description."})
+    player_quantity = fields.Integer(required=False, metadata={"description": "Number of players required. Do not stablish this, it will be calculated automatically from the description."})
+    group_challenge = fields.Boolean(required=False, load_default=False)
+
+class GetTargetChallengeSchema(Schema):
+    """Schema for validating target challenge data."""
+    class Meta:
+        unknown = RAISE
+    title = fields.String(required=False, validate=validate.Length(min=1, max=100))
+    description = fields.String(required=False, validate=validate.Length(min=1, max=500))
+    drinking = fields.Boolean(required=False)
+    sex = fields.Boolean(required=False)
+    smoking = fields.Boolean(required=False)
+    partner_friendly = fields.Boolean(required=False)
+    probability = fields.Float(required=False)
+    icon = fields.String(required=False, allow_none=True)
+    skipping = fields.Float(required=False, allow_none=True)
+    voting = fields.Boolean(required=False)
+    prize = fields.Integer(required=False)
+    males = fields.Integer(required=False, allow_none=True)
+    females = fields.Integer(required=False, allow_none=True)
+    player_quantity = fields.Integer(required=False)
+    group_challenge = fields.Boolean(required=False)
+
+class TitleTargetChallengeSchema(Schema):
+    """Schema for validating target challenge data."""
     title = fields.String(required=True, validate=validate.Length(min=1, max=100))

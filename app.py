@@ -18,6 +18,8 @@ from resources.UserPicture import blp as UserPictureBlueprint
 from resources.Role import blp as RoleBlueprint
 from resources.TurnTypes import blp as TurnTypesBlueprint
 from resources.SecretMission import blp as SecretMissionBlueprint 
+from resources.GroupChallenge import blp as GroupChallengeBlueprint
+from resources.TargetChallenge import blp as TargetChallengeBlueprint
 
 from events.GameEvents import GameEvents
 
@@ -98,9 +100,11 @@ def create_app(settings_module: str | None = None):
     api.register_blueprint(SecretMissionBlueprint, url_prefix=getApiPrefix('secret_mission'))
     api.register_blueprint(SocketDocsBlueprint, url_prefix=getApiPrefix('docs'))
     api.register_blueprint(ChallengeBlueprint, url_prefix=getApiPrefix('challenge'))
+    api.register_blueprint(GroupChallengeBlueprint, url_prefix=getApiPrefix('group_challenge'))
     api.register_blueprint(UserPictureBlueprint, url_prefix=getApiPrefix(''))
     api.register_blueprint(RoleBlueprint, url_prefix=getApiPrefix('role'))
     api.register_blueprint(TurnTypesBlueprint, url_prefix=getApiPrefix('turn-types'))
+    api.register_blueprint(TargetChallengeBlueprint, url_prefix=getApiPrefix('target_challenge'))
 
     # SocketIO events
     socketio.on_namespace(GameEvents(getSocketIOPrefix('game')))
