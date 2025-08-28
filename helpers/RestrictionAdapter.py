@@ -79,10 +79,6 @@ class RestrictionAdapter:
             return desc
         
         try:
-            players.remove(next((p for p in players if p.username == target), None))
-        except Exception:
-            pass
-        try:
             restrictions = RestrictionAdapter.get_restrictions(desc)
             if len(restrictions) > len(players) + 1:
                 return desc
@@ -93,6 +89,10 @@ class RestrictionAdapter:
             if target_key:
                 restrictions.pop(target_key)
                 assigned[target_key] = target
+                try:
+                    players.remove(next((p for p in players if p.username == target), None))
+                except Exception:
+                    pass
             
             for player_key, rest in restrictions.items():
                 gender_restr = next((r for r in rest if r.startswith('gender=')), None)

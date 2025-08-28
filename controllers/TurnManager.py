@@ -90,9 +90,8 @@ class TurnManager(ChallengeProvider):
         if not challenges:
             return None
         
-        players_list.remove(next(filter(lambda x: hasattr(x, 'username') and x.username == player, players_list)))
-
-        selected_players:list[PlayerInfo] = []
+        player_info = next(filter(lambda x: hasattr(x, 'username') and x.username == player, players_list))
+        selected_players:list[PlayerInfo] = [player_info]
 
         challenge = self._choice_with_probabilities(challenges)
         if not challenge:
@@ -105,6 +104,12 @@ class TurnManager(ChallengeProvider):
 
         males_left = needed_males
         females_left = needed_females
+
+        gender = getattr(player_info, 'gender', None)
+        gender_value = getattr(gender, 'value', gender)
+        if gender_value == 'male': males_left -= 1
+        else: females_left -= 1
+
         for p in players_list:
 
             gender = getattr(p, 'gender', None)
@@ -158,6 +163,7 @@ class TurnManager(ChallengeProvider):
         :param players_list: List of all players in the lobby.
         :return: Selected group challenge with players placed in the description, or None if no valid challenge found.
         """
+        print('RETRIVERED GROUP CHALLENGES:', challenges)
         if not challenges:
             return None
 
@@ -182,12 +188,12 @@ class TurnManager(ChallengeProvider):
             for p in players_list:
                 if not hasattr(p, 'username'):
                     continue
-                if p.username == player:
-                    continue
                 elif self._valid_player(p, challenge):
                     valid_players.append(p)
 
+            print('VALID PLAYERS FOR CHALLENGE', challenge.title, ':', valid_players)
             if player_quantity > len(valid_players):
+                print(f"Not enough valid players for challenge '{challenge.title}': needed {player_quantity}, have {len(valid_players) + 1}")
                 challenges_list.remove(challenge)
                 attempts += 1
                 continue
@@ -261,9 +267,10 @@ class TurnManager(ChallengeProvider):
         if not challenges:
             return None
         
-        players_list.remove(next(filter(lambda x: hasattr(x, 'username') and x.username == player, players_list)))
+        player_info = next(filter(lambda x: hasattr(x, 'username') and x.username == player, players_list))
+        players_list.remove(player_info)
 
-        selected_players:list[PlayerInfo] = []
+        selected_players:list[PlayerInfo] = [player_info]
 
         challenge = self._choice_with_probabilities(challenges)
         if not challenge:
@@ -276,6 +283,12 @@ class TurnManager(ChallengeProvider):
 
         males_left = needed_males
         females_left = needed_females
+
+        gender = getattr(player_info, 'gender', None)
+        gender_value = getattr(gender, 'value', gender)
+        if gender_value == 'male': males_left -= 1
+        else: females_left -= 1
+
         for p in players_list:
 
             gender = getattr(p, 'gender', None)
