@@ -391,6 +391,28 @@ class GameController:
         :returns: a PlayerState object containing the player's dynamic state
         """
         return self.player_manager.get_player_state(code, username)
+    
+    def get_current_turn_player(self, code: str) -> str:
+        """Retrieve the username of the player whose turn it currently is.
+
+        :param code: lobby code
+        :returns: the username of the current turn player
+        """
+        lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
+        if not self.redis.exists(lobby_key):
+            raise ValueError(f"Lobby {code} does not exist")
+        players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+        player_count:int = self.redis.llen(players_list_key)
+        if player_count == 0:
+            raise ValueError(f"Cannot get current turn; lobby {code} has no players")
+        current_turn_raw = self.redis.hget(lobby_key, "current_turn")
+        try:
+            current_turn = int(current_turn_raw) if current_turn_raw is not None else 0
+        except (TypeError, ValueError):
+            current_turn = 0
+        current_turn_index = current_turn % player_count
+        player:str = self.redis.lindex(players_list_key, current_turn_index)
+        return player
 
     # ------------------------------------------------------------------
     # Internal helpers

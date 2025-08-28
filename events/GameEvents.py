@@ -5,7 +5,7 @@ from marshmallow import ValidationError
 from controllers.GameController import GameController
 from enums.TurnType import TurnTypeEnum
 from helpers.PlayerInfo import PlayerInfo
-from schemas import CodeAndTurnTypeSchema, PlayerInfoSchema, CodeAndUsernameSchema, CodeAndPlayerSchema, UpdatePlayerSchema
+from schemas import CodeAndDescriptionSchema, CodeAndTurnTypeSchema, PlayerInfoSchema, CodeAndUsernameSchema, CodeAndPlayerSchema, UpdatePlayerSchema
 import base64
 import re
 import time
@@ -325,6 +325,7 @@ class GameEvents(Namespace):
             return {'ok': False, 'error': f'An error occurred while updating profile picture.\n{str(e)}'}
 
     def on_next_turn(self, data:dict):
+        """Proceed to the next turn in the game."""
         try:
             code = data['code'] = str(data['code'])
             turn_type = data['turn_type']
@@ -340,11 +341,21 @@ class GameEvents(Namespace):
         gc: GameController = current_app.extensions['game_controller']
 
         try:
+            self.emit('next_turn_type', {'turn_type': turn_type}, room=code)
+
             challenge, player = gc.next_turn(code, turn_type)
 
             challenge['icon'] = self._challenge_pic_url(challenge.get('title', 'unknown_title_error'), turn_type)
+            
+            if turn_type == TurnTypeEnum.SECRET_MISSION.value:
+                self.emit('following_turn', {
+                        'turn_type': turn_type,
+                        'challenge': None,
+                        'player': player
+                    }, room=code)
+                return {'ok': True, 'challenge': challenge, 'player': player, 'turn_type': turn_type}
 
-            if turn_type == TurnTypeEnum.CHALLENGE.value or turn_type == TurnTypeEnum.GROUP_CHALLENGE.value:
+            else:
                 self.emit('following_turn', {
                     'turn_type': turn_type,
                     'challenge': challenge,
@@ -352,14 +363,41 @@ class GameEvents(Namespace):
                 }, room=code)
                 return {'ok': True}
 
-            else:
-                self.emit('following_turn', {
-                        'turn_type': turn_type,
-                        'player': player
-                    }, room=code)
-                return {'ok': True, 'challenge': challenge}
         except ValueError as e:
             return {'ok': False, 'error': str(e)}
         except Exception as e:
             self.emit('error', {'message': f'An error occurred while proceeding to the next turn.\n{str(e)}'}, room=code)
             return {'ok': False, 'error': f'An error occurred while proceeding to the next turn.\n{str(e)}'}
+        
+    def on_choose_target(self, data:dict):
+        """Choose the participants for a target challenge."""
+        try:
+            code = data['code'] = str(data['code'])
+            description = data['description']
+        except KeyError:
+            return {'ok': False, 'error': 'Lobby code and description are required to choose a target.'}
+        
+        schema = CodeAndDescriptionSchema()
+        try:
+            data = schema.load(data)
+        except ValidationError as e:
+            return {'ok': False, 'error': str(e)}
+        
+        gc: GameController = current_app.extensions['game_controller']
+
+        try:     
+            player = gc.get_current_turn_player(code) 
+
+            self.emit('target_chosen', {
+                'turn_type': TurnTypeEnum.TARGET_CHALLENGE.value,
+                'description': description,
+                'player': player
+            }, room=code)
+
+            return {'ok': True}
+
+        except ValueError as e:
+            return {'ok': False, 'error': str(e)}
+        except Exception as e:
+            self.emit('error', {'message': f'An error occurred while choosing a target.\n{str(e)}'}, room=code)
+            return {'ok': False, 'error': f'An error occurred while choosing a target.\n{str(e)}'}

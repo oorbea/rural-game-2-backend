@@ -4,6 +4,7 @@ from sqlalchemy import or_
 from controllers.GameController import ChallengeProvider
 from enums.TurnType import TurnTypeEnum
 from helpers.PlayerInfo import PlayerInfo
+from helpers.RestrictionAdapter import RestrictionAdapter
 from models.Challenge import Challenge
 from models.GroupChallenge import GroupChallenge
 from models.Role import Role
@@ -25,6 +26,13 @@ class TurnManager(ChallengeProvider):
     def _get_random_player(self, players, *args, **kwargs) -> str:
         """Select a random player from the list."""
         return choice(tuple(players))
+    
+    def _get_valid_players(self, players:list[PlayerInfo], challenge:Challenge|GroupChallenge|SecretMission|TargetChallenge) -> list[PlayerInfo]:
+        valid_players = []
+        for p in players:
+            if self._valid_player(p, challenge):
+                valid_players.append(p)
+        return valid_players
     
     def _ponderate_roles(self, roles_priority:tuple[int], player_quantity: int) -> list[int]:
         total_priority = sum(roles_priority)
@@ -64,6 +72,53 @@ class TurnManager(ChallengeProvider):
 
         return Challenge.query.filter(*filters).all()
     
+    def _choose_challenge(self, player:str, challenges: list[Challenge], players_list: list[PlayerInfo]) -> Challenge|None:
+        """
+        Choose a challenge and select required players based on the challenge requirements.
+        
+        :param player: The player who will perform the challenge.
+        :param challenges: List of valid challenges to choose from.
+        :param players_list: List of all players in the lobby.
+        :return: Selected challenge with players placed in the description, or None if no valid challenge found.
+        """
+        if not challenges:
+            return None
+        
+        players_list.remove(next(filter(lambda x: hasattr(x, 'username') and x.username == player, players_list)))
+
+        selected_players:list[PlayerInfo] = []
+
+        challenge = choice(challenges)
+        if not challenge:
+            return None
+        
+        needed_males = getattr(challenge, 'males', 0) or 0
+        needed_females = getattr(challenge, 'females', 0) or 0
+
+        shuffle(players_list)
+
+        males_left = needed_males
+        females_left = needed_females
+        for p in players_list:
+
+            gender = getattr(p, 'gender', None)
+            gender_value = getattr(gender, 'value', gender)
+            if not males_left and not females_left:
+                if self._valid_player(p, challenge):
+                    selected_players.append(p)
+            elif males_left and (gender == 'male' or gender_value == 'male'):
+                if self._valid_player(p, challenge):
+                    selected_players.append(p)
+                    males_left -= 1
+            elif females_left and (gender == 'female' or gender_value == 'female'):
+                if self._valid_player(p, challenge):
+                    selected_players.append(p)
+                    females_left -= 1
+        
+        shuffle(selected_players)
+        challenge.description = RestrictionAdapter.place_players(challenge.description, selected_players, player)
+        return challenge
+    
     def _get_valid_group_challenges(self, code: str, restrictions: dict, player_name: str) -> list[GroupChallenge]:
         """Get valid group challenges based on lobby composition and player attributes."""
 
@@ -76,6 +131,7 @@ class TurnManager(ChallengeProvider):
             filters += [
                 GroupChallenge.males <= num_males,
                 GroupChallenge.females <= num_females,
+                GroupChallenge.player_quantity <= num_males + num_females
             ]
 
         filters += [
@@ -88,6 +144,14 @@ class TurnManager(ChallengeProvider):
         return GroupChallenge.query.filter(*filters).all()
     
     def _choose_group_challenge(self, player:str, challenges: list[GroupChallenge], players_list: list[PlayerInfo]) -> GroupChallenge|None:
+        """
+        Choose a group challenge and select required players based on the challenge requirements.
+
+        :param player: The player who will perform the challenge.
+        :param challenges: List of valid group challenges to choose from.
+        :param players_list: List of all players in the lobby.
+        :return: Selected group challenge with players placed in the description, or None if no valid challenge found.
+        """
         if not challenges:
             return None
 
@@ -97,6 +161,7 @@ class TurnManager(ChallengeProvider):
 
         challenge_found = False
         challenge = None
+        selected_players: list[PlayerInfo] = []
         while not challenge_found and attempts < max_attempts:
             if not challenges_list:
                 break
@@ -120,11 +185,6 @@ class TurnManager(ChallengeProvider):
                 challenges_list.remove(challenge)
                 attempts += 1
                 continue
-
-            try:
-                selected_players: list[PlayerInfo] = [next(filter(lambda x: hasattr(x, 'username') and x.username == player, players_list))]
-            except StopIteration:
-                raise ValueError(f"Player {player} not found in players list")
 
             shuffle(valid_players)
             males_left = needed_males
@@ -154,7 +214,154 @@ class TurnManager(ChallengeProvider):
                     challenges_list.remove(challenge)
                     attempts += 1
 
-        return challenge if challenge_found else None
+        if challenge_found and challenge:
+            shuffle(selected_players)
+            challenge.description = RestrictionAdapter.place_players(challenge.description, selected_players, player)
+            return challenge
+        
+        return None
+    
+    def _get_valid_secret_missions(self, code: str, restrictions: dict, player_name: str) -> list[SecretMission]:
+        """Get valid secret missions based on lobby composition and player attributes."""
+
+        player:PlayerInfo = self.gc.get_player_info(code, player_name)
+
+        filters = []
+        if restrictions:
+            num_males = int(restrictions.get('males', 0))
+            num_females = int(restrictions.get('females', 0))
+            filters += [
+                SecretMission.males <= num_males,
+                SecretMission.females <= num_females,
+            ]
+
+        filters += [
+            or_(SecretMission.drinking.is_(False), SecretMission.drinking == player.drinking),
+            or_(SecretMission.smoking.is_(False), SecretMission.smoking == player.smoking),
+            or_(SecretMission.partner_friendly.is_(True), SecretMission.partner_friendly == player.partnered)
+        ]
+
+        return SecretMission.query.filter(*filters).all()
+    
+    def _choose_secret_mission(self, player:str, challenges: list[SecretMission], players_list: list[PlayerInfo]) -> SecretMission|None:
+        """
+        Choose a secret mission and select required players based on the secret mission requirements.
+        
+        :param player: The player who will perform the secret mission.
+        :param challenges: List of valid secret missions to choose from.
+        :param players_list: List of all players in the lobby.
+        :return: Selected secret mission with players placed in the description, or None if no valid secret mission found.
+        """
+        if not challenges:
+            return None
+        
+        players_list.remove(next(filter(lambda x: hasattr(x, 'username') and x.username == player, players_list)))
+
+        selected_players:list[PlayerInfo] = []
+
+        challenge = choice(challenges)
+        if not challenge:
+            return None
+        
+        needed_males = getattr(challenge, 'males', 0) or 0
+        needed_females = getattr(challenge, 'females', 0) or 0
+
+        shuffle(players_list)
+
+        males_left = needed_males
+        females_left = needed_females
+        for p in players_list:
+
+            gender = getattr(p, 'gender', None)
+            gender_value = getattr(gender, 'value', gender)
+            if not males_left and not females_left:
+                if self._valid_player(p, challenge):
+                    selected_players.append(p)
+            elif males_left and (gender == 'male' or gender_value == 'male'):
+                if self._valid_player(p, challenge):
+                    selected_players.append(p)
+                    males_left -= 1
+            elif females_left and (gender == 'female' or gender_value == 'female'):
+                if self._valid_player(p, challenge):
+                    selected_players.append(p)
+                    females_left -= 1
+        
+        shuffle(selected_players)
+        challenge.description = RestrictionAdapter.place_players(challenge.description, selected_players, player)
+        return challenge
+    
+    def _get_valid_target_challenges(self, restrictions: dict, players: list[PlayerInfo]) -> list[TargetChallenge]:
+        """Get valid target challenges based on lobby composition and player attributes."""
+        if not players:
+            return []
+        
+        filters = []
+        if restrictions:
+            num_males = int(restrictions.get('males', 0))
+            num_females = int(restrictions.get('females', 0))
+            filters += [
+                TargetChallenge.males <= num_males,
+                TargetChallenge.females <= num_females,
+                TargetChallenge.player_quantity <= num_males + num_females
+            ]
+
+        challenges:list[TargetChallenge] = TargetChallenge.query.filter(*filters).all()
+        valid_challenges:list[TargetChallenge] = []
+        for challenge in challenges:
+            if challenge.group_challenge:
+                valid_males = 0
+                valid_females = 0
+                for p in players:
+                    if self._valid_player(p, challenge):
+                        gender = getattr(p, 'gender', None)
+                        gender_value = getattr(gender, 'value', gender)
+
+                        if gender_value == 'male': valid_males += 1
+                        else: valid_females += 1
+
+                        if valid_males >= challenge.males and valid_females >= challenge.females:
+                            valid_challenges.append(challenge)
+                            break
+            else:
+                valid_player = any(self._valid_player(p, challenge) for p in players)
+                if valid_player:
+                    valid_challenges.append(challenge)
+        return valid_challenges
+
+    def _choose_target_challenge(self, challenges: list[TargetChallenge], players_list: list[PlayerInfo]) -> TargetChallenge|None:
+        """
+        Choose a target challenge and select required players based on the target challenge requirements.
+
+        :param challenges: List of valid target challenges to choose from.
+        :param players_list: List of all players in the lobby.
+        :return: Selected target challenge with listo of possible players placed in the description, or None if no valid target challenge found.
+        """
+        if not challenges:
+            return None
+        
+        valid_players:list[PlayerInfo] = []
+        challenge:TargetChallenge|None = None
+
+        challenge_found = False
+        max_attempts = len(challenges) * 2
+        attempts = 0
+        while not challenge_found and attempts < max_attempts:
+            challenge = choice(challenges)
+            valid_players = self._get_valid_players(players_list, challenge)
+            if challenge.group_challenge:
+                if len(valid_players) < challenge.player_quantity:
+                    attempts += 1
+                    continue
+                challenge_found = True
+            else:
+                if not valid_players:
+                    attempts += 1
+                    continue
+                challenge_found = True
+
+        if challenge_found and challenge:
+            challenge.description = RestrictionAdapter.possible_target_players(challenge, valid_players, players_list)
+            return challenge
     
     def get_next_challenge(self, lobby_code: str, game_state: dict, type:TurnTypeEnum|str = TurnTypeEnum.CHALLENGE) -> dict:
         if not lobby_code:
@@ -171,28 +378,36 @@ class TurnManager(ChallengeProvider):
 
         match type:
             case TurnTypeEnum.CHALLENGE:
-                challenges:list[Challenge] = self._get_valid_challenges(lobby_code, Challenge, game_state.get("restrictions", {"males": 0, "females": 0}), player_name)
-                if not challenges:
+                cha = self._choose_challenge(player_name, self._get_valid_challenges(lobby_code, game_state.get("restrictions", {"males": 0, "females": 0}), player_name), [self.gc.get_player_info(lobby_code, p) for p in game_state.get("order", [])])
+                if cha:
+                    return cha.to_dict()
+                else:
                     raise ValueError("No valid challenges available for the current restrictions")
-                chall = choice(challenges)
-                return chall.to_dict()
+                
             case TurnTypeEnum.GROUP_CHALLENGE:
                 gro = self._choose_group_challenge(player_name, self._get_valid_group_challenges(lobby_code, game_state.get("restrictions", {"males": 0, "females": 0}), player_name), [self.gc.get_player_info(lobby_code, p) for p in game_state.get("order", [])])
-                return gro.to_dict()
+                if gro:
+                    return gro.to_dict()
+                else:
+                    raise ValueError("No valid group challenges available for the current restrictions")
+                
             case TurnTypeEnum.SECRET_MISSION:
-                secret_missions:list[SecretMission] = self._get_valid_challenges(lobby_code, SecretMission, game_state.get("restrictions", {"males": 0, "females": 0}), player_name)
-                if not secret_missions:
+                secr = self._choose_secret_mission(player_name, self._get_valid_secret_missions(lobby_code, game_state.get("restrictions", {"males": 0, "females": 0}), player_name), [self.gc.get_player_info(lobby_code, p) for p in game_state.get("order", [])])
+                if secr:
+                    return secr.to_dict()
+                else:
                     raise ValueError("No valid secret missions available for the current restrictions")
-                secr = choice(secret_missions)
-                return secr.to_dict()
+                
             case TurnTypeEnum.TARGET_CHALLENGE:
-                target_challenges:list[TargetChallenge] = self._get_valid_challenges(lobby_code, TargetChallenge, game_state.get("restrictions", {"males": 0, "females": 0}), player_name)
-                if not target_challenges:
+                all_players:list[PlayerInfo] = [self.gc.get_player_info(lobby_code, p) for p in game_state.get("order", [])]
+                targ = self._choose_target_challenge(self._get_valid_target_challenges(game_state.get("restrictions", {"males": 0, "females": 0}), all_players), all_players)
+                if targ:
+                    return targ.to_dict()
+                else:
                     raise ValueError("No valid target challenges available for the current restrictions")
-                targ = choice(target_challenges)
-                return targ.to_dict()
+            
             case _:
-                raise ValueError(f"Unsupported turn type: {type}")
+                raise ValueError(f"Unsupported turn type: {type}. Supported types are: {[e.value for e in TurnTypeEnum]}")
 
     
     def get_player_roles(self, lobby_code: str, players: list[str]) -> dict[str, str]:
