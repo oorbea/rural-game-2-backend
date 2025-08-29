@@ -792,7 +792,6 @@ class GameEvents(Namespace):
         r = gc.redis
 
         try:
-            # Keys
             base = f"lobby:{code}:vote:team"
             voted_set = f"{base}:voted"
             byuser_hash = f"{base}:byuser"
