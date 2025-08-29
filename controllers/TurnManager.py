@@ -532,36 +532,38 @@ class TurnManager(ChallengeProvider):
         if not lobby_code:
             raise ValueError("Lobby code is required to assign roles")
         
+        players_list = players.copy()
+        
         players_with_roles = {}
         
         remaining_roles:list[Role] = []
         for role in self._roles:
-            if not players:
+            if not players_list:
                 break
             if role.quantity_per_game is not None:
                 for i in range(role.quantity_per_game):
-                    if players:
-                        player = self._get_random_player(players)
-                        players.remove(player)
+                    if players_list:
+                        player = self._get_random_player(players_list)
+                        players_list.remove(player)
                         players_with_roles[player] = role.title
                     else:
                         break
             else:
                 remaining_roles.append(role)
         
-        if remaining_roles and players:
+        if remaining_roles and players_list:
             roles_priority = [role.priority for role in remaining_roles]
-            ponderated = self._ponderate_roles(roles_priority, len(players))
+            ponderated = self._ponderate_roles(roles_priority, len(players_list))
             for i, role in enumerate(remaining_roles):
                 for _ in range(ponderated[i]):
-                    if players:
-                        player = self._get_random_player(players)
-                        players.remove(player)
+                    if players_list:
+                        player = self._get_random_player(players_list)
+                        players_list.remove(player)
                         players_with_roles[player] = role.title
                     else:
                         break
         
-        for player in players:
+        for player in players_list:
             players_with_roles[player] = "default"
         
         return players_with_roles
