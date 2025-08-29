@@ -294,6 +294,14 @@ channels:
       message:
         $ref: '#/components/messages/ProfilePictureUpdated'
 
+  next_turn_type:
+    description: Pre-announcement of the upcoming turn type, emitted as soon as it is decided (before `following_turn`).
+    subscribe:
+      operationId: nextTurnType
+      summary: Receive the upcoming turn type and the current turn player.
+      message:
+        $ref: '#/components/messages/NextTurnType'
+
   following_turn:
     description: Broadcast with the next turn info. Always includes participants; for team challenges includes `teams`.
     subscribe:
@@ -693,6 +701,21 @@ components:
             format: uri
             nullable: true
           removed: { type: boolean }
+
+    NextTurnType:
+      name: NextTurnType
+      title: Next Turn Type
+      summary: Pre-announcement of the upcoming turn type; full data will arrive in `following_turn`.
+      payload:
+        type: object
+        required: [turn_type, player]
+        properties:
+          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
+          player: { type: string }
+      examples:
+        - payload:
+            turn_type: group_challenge_type
+            player: Alice
 
     FollowingTurnWithChallenge:
       name: FollowingTurnWithChallenge
