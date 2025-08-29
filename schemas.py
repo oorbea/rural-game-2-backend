@@ -238,3 +238,9 @@ class GetTargetChallengeSchema(Schema):
 class TitleTargetChallengeSchema(Schema):
     """Schema for validating target challenge data."""
     title = fields.String(required=True, validate=validate.Length(min=1, max=100))
+
+class GivePointsSchema(Schema):
+    """Schema for validating give points data."""
+    code = fields.String(required=True, validate=validate.Length(equal=4))
+    player_name = fields.String(required=True)
+    points = fields.Integer(required=True)

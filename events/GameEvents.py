@@ -6,7 +6,7 @@ from marshmallow import ValidationError
 from controllers.GameController import GameController
 from enums.TurnType import TurnTypeEnum
 from helpers.PlayerInfo import PlayerInfo
-from schemas import CodeAndDescriptionSchema, CodeAndTurnTypeSchema, PlayerInfoSchema, CodeAndUsernameSchema, CodeAndPlayerSchema, SkipOrCompleteTurnSchema, UpdatePlayerSchema, VoteSchema, VoteTeamSchema
+from schemas import CodeAndDescriptionSchema, CodeAndTurnTypeSchema, GivePointsSchema, PlayerInfoSchema, CodeAndUsernameSchema, CodeAndPlayerSchema, SkipOrCompleteTurnSchema, UpdatePlayerSchema, VoteSchema, VoteTeamSchema
 import base64
 import re
 import time
@@ -205,7 +205,7 @@ class GameEvents(Namespace):
             info_dict = info.to_dict()
             info_dict['profile_picture_url'] = self._profile_pic_url(code, username)
             info_dict.pop('profile_pic', None)
-            
+
             return {'ok': True, 'player_info': info_dict}
 
         except ValueError as e:
@@ -761,3 +761,36 @@ class GameEvents(Namespace):
         except Exception as e:
             self.emit('error', {'message': f'An error occurred during team voting.\n{str(e)}'}, room=code)
             return {'ok': False, 'error': f'An error occurred during team voting.\n{str(e)}'}
+
+    def on_give_points(self, data: dict):
+        """Give points to a player."""
+        try:
+            code = data['code'] = str(data['code'])
+            receiver = data['player_name']
+            points = data['points'] = int(data['points'])
+        except KeyError:
+            return {'ok': False, 'error': 'Lobby code, receiver username and points are required to give points.'}
+
+        schema = GivePointsSchema()
+        try:
+            data = schema.load(data)
+        except ValidationError as e:
+            return {'ok': False, 'error': str(e)}
+
+        gc: GameController = current_app.extensions['game_controller']
+        try:
+            new_score = gc.update_score(code, receiver, points)
+
+            self.emit('points_given', {
+                'player': receiver,
+                'points': points,
+                'new_score': new_score
+            }, room=code)
+
+            return {'ok': True}
+
+        except ValueError as e:
+            return {'ok': False, 'error': str(e)}
+        except Exception as e:
+            self.emit('error', {'message': f'An error occurred while giving points.\n{str(e)}'}, room=code)
+            return {'ok': False, 'error': f'An error occurred while giving points.\n{str(e)}'}
