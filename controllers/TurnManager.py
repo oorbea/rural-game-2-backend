@@ -476,9 +476,30 @@ class TurnManager(ChallengeProvider):
                     [self.gc.get_player_info(lobby_code, p) for p in game_state.get("order", [])]
                 )
                 if secr:
+                    try:
+                        self.gc.assign_secret_mission(lobby_code, player_name, secr.title)
+                    except Exception:
+                        pass
+
+                    try:
+                        meta = {
+                            "turn_type": TurnTypeEnum.SECRET_MISSION.value,
+                            "title": secr.title,
+                            "performer": player_name,
+                            "group_challenge": False,
+                            "participants": json.dumps([player_name]),
+                            "teams": json.dumps([]),
+                            "prize": secr.prize,
+                            "voting": False,
+                        }
+                        self.gc.set_current_challenge_meta(lobby_code, meta)
+                    except Exception:
+                        pass
+
                     return secr.to_dict()
                 else:
                     raise ValueError("No valid secret missions available for the current restrictions")
+
                 
             case TurnTypeEnum.TARGET_CHALLENGE:
                 all_players: list[PlayerInfo] = [self.gc.get_player_info(lobby_code, p) for p in game_state.get("order", [])]
