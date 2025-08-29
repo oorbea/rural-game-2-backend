@@ -145,7 +145,7 @@ channels:
         description: |
           Ack varies by turn type:
             - challenge, group_challenge => { ok: true }
-            - secret_mission, target_challenge => { ok: true, challenge: {...} }
+            - secret_mission, target_challenge => { ok: true, challenge: {...}, player, turn_type }
         oneOf:
           - $ref: '#/components/schemas/AckOkOnly'
           - $ref: '#/components/schemas/AckNextTurnChallengeSuccess'
@@ -225,6 +225,33 @@ channels:
           - $ref: '#/components/schemas/AckError'
 
   # -------------------------
+  # Extra client -> server queries
+  # -------------------------
+  get_role_info:
+    description: Client requests their current role info (rendered description) including a role picture URL.
+    publish:
+      operationId: getRoleInfo
+      summary: Retrieve role title, description and picture URL.
+      message:
+        $ref: '#/components/messages/GetRoleInfo'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckGetRoleInfoSuccess'
+          - $ref: '#/components/schemas/AckError'
+
+  get_player_secret_missions:
+    description: Client requests their pending secret missions including picture URLs.
+    publish:
+      operationId: getPlayerSecretMissions
+      summary: Retrieve pending secret missions (title, description, prize, punishment, picture_url).
+      message:
+        $ref: '#/components/messages/GetPlayerSecretMissions'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckGetPlayerSecretMissionsSuccess'
+          - $ref: '#/components/schemas/AckError'
+
+  # -------------------------
   # Server -> client messages
   # -------------------------
   player_joined:
@@ -284,6 +311,14 @@ channels:
       summary: Receive the final assignment for target challenge participants.
       message:
         $ref: '#/components/messages/TargetChosen'
+
+  team_vote_started:
+    description: Broadcast when a team vote session is opened.
+    subscribe:
+      operationId: teamVoteStarted
+      summary: Receive teams and expected number of voters.
+      message:
+        $ref: '#/components/messages/TeamVoteStarted'
 
   turn_skipped:
     description: Broadcast when a turn is skipped.
@@ -349,6 +384,22 @@ channels:
       message:
         $ref: '#/components/messages/PointsGiven'
 
+  game_finished:
+    description: Broadcast when a player reaches the configured points_to_win. Emitted before the lobby is closed.
+    subscribe:
+      operationId: gameFinished
+      summary: Receive winner info and target points; lobby will be closed right after.
+      message:
+        $ref: '#/components/messages/GameFinished'
+
+  lobby_closed:
+    description: Broadcast when the lobby state has been cleaned up after a game finishes.
+    subscribe:
+      operationId: lobbyClosed
+      summary: Receive confirmation that the lobby has been removed.
+      message:
+        $ref: '#/components/messages/LobbyClosed'
+
   error:
     description: Error notifications related to lobby or game operations.
     subscribe:
@@ -369,6 +420,10 @@ components:
         properties:
           player:
             $ref: '#/components/schemas/PlayerInfo'
+          points_to_win:
+            type: integer
+            minimum: 1
+            description: Optional target points to automatically finish the game.
       examples:
         - payload:
             player:
@@ -378,6 +433,7 @@ components:
               partnered: false
               virgin: false
               gender: male
+            points_to_win: 1000
 
     JoinLobby:
       name: JoinLobby
@@ -498,7 +554,7 @@ components:
           code: { $ref: '#/components/schemas/LobbyCode' }
           description:
             type: string
-            description: Final description text with chosen usernames (e.g. "{player0} becomes Alice").
+            description: Final description text with chosen usernames (e.g. "{Alice} vs {Bob}").
 
     SkipOrComplete:
       name: SkipOrComplete
@@ -551,6 +607,28 @@ components:
             code: "1234"
             player_name: "Carol"
             team: "Team1"
+
+    GetRoleInfo:
+      name: GetRoleInfo
+      title: Get Role Info
+      summary: Retrieve current role info for a player.
+      payload:
+        type: object
+        required: [code, player_name]
+        properties:
+          code: { $ref: '#/components/schemas/LobbyCode' }
+          player_name: { type: string }
+
+    GetPlayerSecretMissions:
+      name: GetPlayerSecretMissions
+      title: Get Player Secret Missions
+      summary: Retrieve pending secret missions for a player.
+      payload:
+        type: object
+        required: [code, player_name]
+        properties:
+          code: { $ref: '#/components/schemas/LobbyCode' }
+          player_name: { type: string }
 
     PlayerJoined:
       name: PlayerJoined
@@ -665,7 +743,6 @@ components:
           participants:
             type: array
             items: { type: string }
-          # Optional meta keys may be included depending on server logic:
           slots:
             type: array
             items: { type: string }
@@ -682,6 +759,21 @@ components:
           turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
           description: { type: string }
           player: { type: string }
+
+    TeamVoteStarted:
+      name: TeamVoteStarted
+      title: Team Vote Started
+      summary: Broadcast when a team voting session opens (teams & expected voters).
+      payload:
+        type: object
+        required: [turn_type, title, teams, expected]
+        properties:
+          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
+          title: { type: string }
+          teams:
+            type: array
+            items: { $ref: '#/components/schemas/Team' }
+          expected: { type: integer }
 
     TurnSkipped:
       name: TurnSkipped
@@ -805,6 +897,36 @@ components:
           points: { type: integer }
           new_score: { type: integer }
 
+    GameFinished:
+      name: GameFinished
+      title: Game Finished
+      summary: Winner announcement; lobby will be cleaned afterwards.
+      payload:
+        type: object
+        required: [winner]
+        properties:
+          winner: { type: string }
+          points_to_win:
+            type: integer
+            nullable: true
+          ended_at:
+            type: string
+            format: date-time
+            nullable: true
+          closing:
+            type: boolean
+            description: Hint that server will close and clean the lobby right after.
+
+    LobbyClosed:
+      name: LobbyClosed
+      title: Lobby Closed
+      summary: Confirmation that the lobby has been deleted/cleaned after game finish.
+      payload:
+        type: object
+        required: [code]
+        properties:
+          code: { $ref: '#/components/schemas/LobbyCode' }
+
     Error:
       name: Error
       title: Error
@@ -883,6 +1005,7 @@ components:
       properties:
         lobby:
           type: object
+          description: Lobby metadata (may include host, current_turn, active, points_to_win, winner, created_at, started_at, ended_at).
         players:
           type: object
           additionalProperties:
@@ -915,6 +1038,28 @@ components:
         prize: { type: integer }
         voting: { type: boolean, default: false }
         icon:
+            type: string
+            format: uri
+
+    RoleInfo:
+      type: object
+      required: [title, description, picture_url]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        picture_url:
+          type: string
+          format: uri
+
+    SecretMissionInfo:
+      type: object
+      required: [title, description, prize, punishment, picture_url]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        prize: { type: integer }
+        punishment: { type: integer }
+        picture_url:
           type: string
           format: uri
 
@@ -968,6 +1113,10 @@ components:
         connected_players:
           type: array
           items: { $ref: '#/components/schemas/ConnectedPlayer' }
+        points_to_win:
+          type: integer
+          nullable: true
+          description: Echoed when provided (>0).
 
     AckJoinLobbySuccess:
       type: object
@@ -1036,11 +1185,16 @@ components:
 
     AckNextTurnChallengeSuccess:
       type: object
-      description: Returned only for secret_mission and target_challenge.
+      description: Returned for secret_mission and target_challenge.
       required: [ok, challenge]
       properties:
         ok: { type: boolean, const: true }
         challenge: { $ref: '#/components/schemas/Challenge' }
+        player:
+          type: string
+          description: Current turn player (present in some turn types).
+        turn_type:
+          $ref: '#/components/schemas/TurnTypeEnum'
 
     AckCompleteTurnNeedsVoting:
       type: object
@@ -1074,3 +1228,19 @@ components:
           type: object
           additionalProperties:
             type: integer
+
+    AckGetRoleInfoSuccess:
+      type: object
+      required: [ok, role]
+      properties:
+        ok: { type: boolean, const: true }
+        role: { $ref: '#/components/schemas/RoleInfo' }
+
+    AckGetPlayerSecretMissionsSuccess:
+      type: object
+      required: [ok, missions]
+      properties:
+        ok: { type: boolean, const: true }
+        missions:
+          type: array
+          items: { $ref: '#/components/schemas/SecretMissionInfo' }
