@@ -74,10 +74,18 @@ class GameController:
     # ------------------------------------------------------------------
     # Lobby management
     # ------------------------------------------------------------------
-    def create_lobby(self, host: PlayerInfo) -> str:
+    def create_lobby(self, host: PlayerInfo, points_to_win: int | None = None) -> str:
         code = self._generate_unique_code()
         lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
         players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
+
+        ptw = None
+        try:
+            if points_to_win is not None:
+                v = int(points_to_win)
+                ptw = v if v > 0 else None
+        except Exception:
+            ptw = None
 
         lobby_meta = {
             "created_at": datetime.now().astimezone().isoformat(),
@@ -85,6 +93,9 @@ class GameController:
             "active": True,
             "host": host.username,
         }
+        if ptw is not None:
+            lobby_meta["points_to_win"] = ptw
+
         self._hset_serialized(lobby_key, mapping=lobby_meta)
         self.redis.sadd(self.ACTIVE_LOBBIES_SET, code)
 
@@ -240,6 +251,20 @@ class GameController:
         """
         players_list_key = self.PLAYERS_LIST_TEMPLATE.format(code=code)
         lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
+
+        if self.redis.exists(lobby_key):
+            lobby_meta = self.redis.hgetall(lobby_key) or {}
+            winner = lobby_meta.get("winner")
+            active_raw = lobby_meta.get("active")
+            is_active = True
+            if active_raw is not None:
+                try:
+                    is_active = bool(active_raw) if isinstance(active_raw, bool) else bool(int(active_raw))
+                except Exception:
+                    is_active = True
+            if winner or not is_active:
+                raise ValueError("The game has already ended")
+
         player_count:int = self.redis.llen(players_list_key)
         if player_count == 0:
             raise ValueError(f"Cannot progress turn; lobby {code} has no players")
@@ -320,7 +345,14 @@ class GameController:
         if not self.redis.exists(state_key):
             raise ValueError(f"No state for player {username} in lobby {code}")
         self.redis.hincrby(state_key, "points", delta)
-        return int(self.redis.hget(state_key, "points") or 0)
+        new_points = int(self.redis.hget(state_key, "points") or 0)
+
+        try:
+            self._maybe_finish_game(code, username, current_points=new_points)
+        except Exception:
+            pass
+
+        return new_points
 
     def assign_role(self, code: str, username: str, role: str) -> None:
         """Assign a role to a player.
@@ -954,3 +986,45 @@ class GameController:
             "expected": len(eligibles),
         }
         self._hset_serialized(session_key, mapping=mapping)
+
+    def _maybe_finish_game(self, code: str, username: str, current_points: int | None = None) -> None:
+        lobby_key = self.LOBBY_KEY_TEMPLATE.format(code=code)
+        if not self.redis.exists(lobby_key):
+            return
+
+        lobby_meta = self.redis.hgetall(lobby_key) or {}
+
+        if lobby_meta.get("winner"):
+            return
+        active_raw = lobby_meta.get("active")
+        if active_raw is not None:
+            try:
+                if not (bool(active_raw) if isinstance(active_raw, bool) else bool(int(active_raw))):
+                    return
+            except Exception:
+                pass
+
+        raw = lobby_meta.get("points_to_win")
+        if raw is None:
+            return
+        try:
+            target = int(raw)
+        except Exception:
+            return
+        if target <= 0:
+            return
+
+        pts = current_points
+        if pts is None:
+            try:
+                pts = self.get_player_state(code, username).points
+            except Exception:
+                return
+
+        if pts >= target:
+            payload = {
+                "winner": username,
+                "ended_at": datetime.now().astimezone().isoformat(),
+                "active": False,
+            }
+            self._hset_serialized(lobby_key, mapping=payload)

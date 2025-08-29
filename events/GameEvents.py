@@ -31,6 +31,38 @@ class GameEvents(Namespace):
         turn_type = turn_type.value if hasattr(turn_type, 'value') else str(turn_type)
         title = quote_plus(title)
         return f"{host}{api_prefix}/{turn_type.replace('_type', '')}/icon?title={title}"
+    
+    def _maybe_emit_game_finished(self, code: str):
+        gc: GameController = current_app.extensions['game_controller']
+        try:
+            state = gc.get_lobby_state(code)
+        except Exception:
+            return
+
+        lobby = state.get("lobby", {}) or {}
+        winner = lobby.get("winner")
+        if not winner:
+            return
+
+        try:
+            ptw = int(lobby.get("points_to_win")) if lobby.get("points_to_win") is not None else None
+        except Exception:
+            ptw = None
+
+        payload = {
+            "winner": winner,
+            "points_to_win": ptw,
+            "ended_at": lobby.get("ended_at"),
+            "closing": True,
+        }
+        self.emit('game_finished', payload, room=code)
+
+        try:
+            gc.end_lobby(code)
+        except Exception:
+            pass
+
+        self.emit('lobby_closed', {'code': code}, room=code)
         
     def on_create_lobby(self, data: dict):
         try:
@@ -44,9 +76,18 @@ class GameEvents(Namespace):
         except ValidationError as e:
             return {'ok': False, 'error': str(e)}
 
+        points_to_win = data.get('points_to_win')
+        try:
+            if points_to_win is not None:
+                points_to_win = int(points_to_win)
+                if points_to_win <= 0:
+                    points_to_win = None
+        except Exception:
+            points_to_win = None
+
         gc: GameController = current_app.extensions['game_controller']
         try:
-            code = gc.create_lobby(PlayerInfo(**player))
+            code = gc.create_lobby(PlayerInfo(**player), points_to_win=points_to_win)
             join_room(code)
 
             self.emit('player_joined', {
@@ -55,15 +96,16 @@ class GameEvents(Namespace):
             }, room=code, include_self=False)
 
             players = gc.redis.lrange(gc.PLAYERS_LIST_TEMPLATE.format(code=code), 0, -1)
-            return {'ok': True, 'code': code, 'connected_players': [
+            resp = {'ok': True, 'code': code, 'connected_players': [
                 {'username': p, 'profile_picture_url': self._profile_pic_url(code, p)} for p in players
             ]}
+            if points_to_win is not None:
+                resp['points_to_win'] = points_to_win
+            return resp
         except ValueError as e:
             return {'ok': False, 'error': str(e)}
         except Exception as e:
             return {'ok': False, 'error': f'An error occurred while creating the lobby.\n{str(e)}'}
-
-
 
     def on_join_lobby(self, data: dict):
         try:
@@ -345,13 +387,12 @@ class GameEvents(Namespace):
             return {'ok': False, 'error': f'An error occurred while updating profile picture.\n{str(e)}'}
 
     def on_next_turn(self, data:dict):
-        """Proceed to the next turn in the game."""
         try:
             code = data['code'] = str(data['code'])
             turn_type = data['turn_type']
         except KeyError:
             return {'ok': False, 'error': 'Lobby code and turn type are required to proceed to the next turn.'}
-        
+
         schema = CodeAndTurnTypeSchema()
         try:
             data = schema.load(data)
@@ -359,6 +400,17 @@ class GameEvents(Namespace):
             return {'ok': False, 'error': str(e)}
         
         gc: GameController = current_app.extensions['game_controller']
+
+        try:
+            st = gc.get_lobby_state(code)
+            lb = st.get("lobby", {}) or {}
+            if lb.get("winner") or (str(lb.get("active", "true")).lower() in ("0","false","f","no","n")):
+                w = lb.get("winner")
+                if w:
+                    return {'ok': False, 'error': f'The game has already finished. Winner: {w}.'}
+                return {'ok': False, 'error': 'The game is not active.'}
+        except Exception:
+            pass
 
         try:
             self.emit('next_turn_type', {'turn_type': turn_type}, room=code)
@@ -518,6 +570,7 @@ class GameEvents(Namespace):
                 'new_score': new_score
             }, room=code)
 
+            self._maybe_emit_game_finished(code)
             return {'ok': True}
 
         except ValueError as e:
@@ -600,6 +653,7 @@ class GameEvents(Namespace):
                         'new_scores': totals
                     }, room=code)
                     gc.clear_current_challenge_meta(code)
+                    self._maybe_emit_game_finished(code)
                     return {'ok': True}
 
             score, voting = gc.complete_turn(code, player, turn_type, title)
@@ -618,6 +672,8 @@ class GameEvents(Namespace):
                 'title': title,
                 'new_score': score
             }, room=code)
+
+            self._maybe_emit_game_finished(code)
             return {'ok': True}
         
         except ValueError as e:
@@ -708,6 +764,7 @@ class GameEvents(Namespace):
                     'new_score': new_score
                 }, room=code)
 
+                self._maybe_emit_game_finished(code)
                 return {'ok': True, 'average': avg, 'award_points': award_points, 'performer': performer, 'new_score': new_score}
 
             return {'ok': True}
@@ -849,6 +906,7 @@ class GameEvents(Namespace):
                 'new_score': new_score
             }, room=code)
 
+            self._maybe_emit_game_finished(code)
             return {'ok': True}
 
         except ValueError as e:
@@ -889,6 +947,8 @@ class GameEvents(Namespace):
                 'judged_by': judge_name
             }
             self.emit('secret_mission_judged', payload, room=code)
+
+            self._maybe_emit_game_finished(code)
             return {'ok': True, **payload}
         except ValueError as e:
             return {'ok': False, 'error': str(e)}
@@ -924,6 +984,8 @@ class GameEvents(Namespace):
                 'guessed_role': guessed_role,
                 'correct': correct
             }, room=code)
+
+            self._maybe_emit_game_finished(code)
             return {
                 'ok': True,
                 'correct': correct,
