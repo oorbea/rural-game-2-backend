@@ -531,42 +531,83 @@ class TurnManager(ChallengeProvider):
             raise ValueError("Cannot assign roles: no players or roles available")
         if not lobby_code:
             raise ValueError("Lobby code is required to assign roles")
-        
+
         players_list = players.copy()
-        
-        players_with_roles = {}
-        
-        remaining_roles:list[Role] = []
+        shuffle(players_list)
+        players_with_roles: dict[str, str] = {}
+
+        remaining_roles: list[Role] = []
         for role in self._roles:
             if not players_list:
                 break
+
+            if (role.title or "").strip().lower() == "tortolitos" and (role.quantity_per_game or 0) >= 2:
+                if len(players_list) >= 2:
+                    males = []
+                    females = []
+                    for p in list(players_list):
+                        try:
+                            info = self.gc.get_player_info(lobby_code, p)
+                            g = getattr(getattr(info, "gender", None), "value", getattr(info, "gender", None))
+                            if str(g).lower() == "male":
+                                males.append(p)
+                            elif str(g).lower() == "female":
+                                females.append(p)
+                        except Exception:
+                            pass
+
+                    chosen: list[str] = []
+                    if males and females:
+                        from random import choice as rchoice
+                        chosen = [rchoice(males), rchoice(females)]
+                    else:
+                        from random import sample
+                        chosen = sample(players_list, 2)
+
+                    for u in chosen:
+                        if u in players_list:
+                            players_list.remove(u)
+                        players_with_roles[u] = role.title
+
+                    extra = (role.quantity_per_game or 2) - 2
+                    for _ in range(max(0, extra)):
+                        if players_list:
+                            from random import choice
+                            u = choice(players_list)
+                            players_list.remove(u)
+                            players_with_roles[u] = role.title
+                    continue
+
             if role.quantity_per_game is not None:
-                for i in range(role.quantity_per_game):
+                for _ in range(role.quantity_per_game):
                     if players_list:
-                        player = self._get_random_player(players_list)
+                        from random import choice
+                        player = choice(players_list)
                         players_list.remove(player)
                         players_with_roles[player] = role.title
                     else:
                         break
             else:
                 remaining_roles.append(role)
-        
+
         if remaining_roles and players_list:
             roles_priority = [role.priority for role in remaining_roles]
             ponderated = self._ponderate_roles(roles_priority, len(players_list))
             for i, role in enumerate(remaining_roles):
                 for _ in range(ponderated[i]):
                     if players_list:
-                        player = self._get_random_player(players_list)
+                        from random import choice
+                        player = choice(players_list)
                         players_list.remove(player)
                         players_with_roles[player] = role.title
                     else:
                         break
-        
+
         for player in players_list:
             players_with_roles[player] = "default"
-        
+
         return players_with_roles
+
     
     def skip_turn(self, lobby_code: str, player:str, turn_type: TurnTypeEnum, title: str) -> int:
         if not lobby_code:

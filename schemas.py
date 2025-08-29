@@ -244,3 +244,16 @@ class GivePointsSchema(Schema):
     code = fields.String(required=True, validate=validate.Length(equal=4))
     player_name = fields.String(required=True)
     points = fields.Integer(required=True)
+
+class JudgeSecretMissionSchema(Schema):
+    code = fields.String(required=True, validate=validate.Length(equal=4))
+    judge_name = fields.String(required=True)
+    player_name = fields.String(required=True)
+    mission_title = fields.String(required=True)
+    success = fields.Boolean(required=True)
+
+class DetectiveGuessSchema(Schema):
+    code = fields.String(required=True, validate=validate.Length(equal=4))
+    detective_name = fields.String(required=True)
+    target_player = fields.String(required=True)
+    guessed_role = fields.String(required=True)

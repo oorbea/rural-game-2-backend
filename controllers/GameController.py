@@ -37,7 +37,8 @@ class GameController:
     CURRENT_CHALLENGE_KEY = "lobby:{code}:current_challenge"
     TEAM_VOTE_SESSION_KEY_TEMPLATE = "lobby:{code}:team_vote:session"
     TEAM_VOTE_VOTES_KEY_TEMPLATE = "lobby:{code}:team_vote:votes"
-
+    DETECTIVE_LOCKED_TARGETS_TEMPLATE = "lobby:{code}:detective:locked_targets"
+    DETECTIVE_COOLDOWN_TEMPLATE = "lobby:{code}:detective:cooldown:{detective}"
 
     def __init__(self, redis_client: redis.Redis, challenge_provider: ChallengeProvider, player_manager: PlayerManager) -> None:
         self.redis = redis_client
@@ -48,6 +49,27 @@ class GameController:
             setattr(self.challenge_provider, 'gc', self)
         except Exception:
             pass
+
+    # ---------------------------
+    # NEW: role/mission utilities
+    # ---------------------------
+    def _get_role_of(self, code: str, username: str) -> str | None:
+        st = self.get_player_state(code, username)
+        return st.role
+
+    def _is_role(self, code: str, username: str, role_title: str) -> bool:
+        r = self._get_role_of(code, username)
+        return (r or "").strip().lower() == (role_title or "").strip().lower()
+    
+    def get_vote_weight(self, code: str, username: str) -> int:
+        """
+        Returns 2 if the voter has the 'Dictador' role, otherwise 1.
+        """
+        try:
+            return 2 if self._is_role(code, username, "Dictador") else 1
+        except Exception:
+            return 1
+
 
     # ------------------------------------------------------------------
     # Lobby management
@@ -706,6 +728,96 @@ class GameController:
         key = self.CURRENT_CHALLENGE_KEY.format(code=code)
         self.redis.delete(key)
 
+    def judge_secret_mission(self, code: str, judge_name: str, player_name: str, mission_title: str, success: bool) -> tuple[int, int]:
+        if not self._is_role(code, judge_name, "Juez"):
+            raise ValueError("Only the Judge can validate secret missions")
+
+        st = self.get_player_state(code, player_name)
+        if mission_title not in st.secret_missions:
+            raise ValueError("This secret mission is not currently assigned to the player")
+
+        from models.SecretMission import SecretMission
+        mission = SecretMission.query.get(mission_title)
+        if not mission:
+            raise ValueError(f"Secret mission '{mission_title}' not found")
+
+        delta = int(round(mission.prize)) if success else -int(round(mission.punishment))
+        new_score = self.update_score(code, player_name, delta)
+
+        state_key = self.PLAYER_STATE_TEMPLATE.format(code=code, username=player_name)
+        remaining = [m for m in st.secret_missions if m != mission_title]
+        self.redis.hset(state_key, "secret_missions", json.dumps(remaining))
+
+        return new_score, delta
+    
+    def detective_guess_role(self, code: str, detective_name: str, target_player: str, guessed_role: str) -> tuple[bool, int, int]:
+        if not self._is_role(code, detective_name, "Detective"):
+            raise ValueError("Only the Detective can make role guesses")
+
+        if detective_name == target_player:
+            raise ValueError("You cannot guess your own role")
+
+        locked_key = self.DETECTIVE_LOCKED_TARGETS_TEMPLATE.format(code=code)
+        if self.redis.sismember(locked_key, target_player):
+            raise ValueError("This player's role has already been correctly guessed")
+
+        cd_key = self.DETECTIVE_COOLDOWN_TEMPLATE.format(code=code, detective=detective_name)
+        num_seconds:int = self.redis.ttl(cd_key)
+        if num_seconds > 0:
+            raise ValueError("Detective is on cooldown")
+
+        actual = (self._get_role_of(code, target_player) or "default").strip().lower()
+        guess = (guessed_role or "").strip().lower()
+
+        correct = (actual == guess)
+        delta = 200 if correct else -200
+        new_score = self.update_score(code, detective_name, delta)
+
+        if correct:
+            self.redis.sadd(locked_key, target_player)
+        else:
+            self.redis.setex(cd_key, 60, "1")
+
+        return correct, delta, new_score
+
+    def get_role_info(self, code: str, username: str) -> dict:
+        role_title = self._get_role_of(code, username) or "default"
+        if role_title.lower() == "default":
+            return {"title": "default", "description": ""}
+
+        from models.Role import Role
+        role = Role.query.get(role_title)
+        if not role:
+            return {"title": role_title, "description": ""}
+
+        from helpers.RestrictionAdapter import RestrictionAdapter
+        desc = RestrictionAdapter.render_role_description_for_player(
+            role_title=role.title,
+            description=role.description or "",
+            lobby_code=code,
+            player_name=username,
+            gc=self
+        )
+        return {"title": role.title, "description": desc}
+
+    def get_player_secret_missions(self, code: str, username: str) -> list[dict]:
+        st = self.get_player_state(code, username)
+        titles = list(st.secret_missions or [])
+        if not titles:
+            return []
+
+        from models.SecretMission import SecretMission
+        missions = []
+        for t in titles:
+            sm = SecretMission.query.get(t)
+            if sm:
+                missions.append({
+                    "title": sm.title,
+                    "description": sm.description,
+                    "prize": int(round(sm.prize)),
+                    "punishment": int(round(sm.punishment)),
+                })
+        return missions
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -6,7 +6,7 @@ from marshmallow import ValidationError
 from controllers.GameController import GameController
 from enums.TurnType import TurnTypeEnum
 from helpers.PlayerInfo import PlayerInfo
-from schemas import CodeAndDescriptionSchema, CodeAndTurnTypeSchema, GivePointsSchema, PlayerInfoSchema, CodeAndUsernameSchema, CodeAndPlayerSchema, SkipOrCompleteTurnSchema, UpdatePlayerSchema, VoteSchema, VoteTeamSchema
+from schemas import CodeAndDescriptionSchema, CodeAndTurnTypeSchema, DetectiveGuessSchema, GivePointsSchema, JudgeSecretMissionSchema, PlayerInfoSchema, CodeAndUsernameSchema, CodeAndPlayerSchema, SkipOrCompleteTurnSchema, UpdatePlayerSchema, VoteSchema, VoteTeamSchema
 import base64
 import re
 import time
@@ -626,14 +626,16 @@ class GameEvents(Namespace):
             self.emit('error', {'message': f'An error occurred while completing the turn.\n{str(e)}'}, room=code)
             return {'ok': False, 'error': f'An error occurred while completing the turn.\n{str(e)}'}
         
-    def on_vote(self, data:dict):
-        """Vote for the performance of the last completed turn."""
+    def on_vote(self, data: dict):
+        """Vote for the performance of the last completed turn (0..10). Dictator counts as double."""
         try:
             code = data['code'] = str(data['code'])
             voter = data['player_name']
-            vote = data['vote']
+            vote = int(data['vote'])
         except KeyError:
             return {'ok': False, 'error': 'Lobby code, player username and vote are required to vote.'}
+        except ValueError:
+            return {'ok': False, 'error': 'Vote must be an integer.'}
 
         schema = VoteSchema()
         try:
@@ -642,46 +644,73 @@ class GameEvents(Namespace):
             return {'ok': False, 'error': str(e)}
 
         gc: GameController = current_app.extensions['game_controller']
-
+        r = gc.redis
         try:
-            result = gc.cast_vote(code, voter, int(vote))
+            base = f"lobby:{code}:vote:performance"
+            voted_set = f"{base}:voted"
+            byuser_hash = f"{base}:byuser"
 
-            self.emit('vote_progress', {
-                'turn_type': result.get('turn_type'),
-                'title': result.get('title'),
-                'player': result.get('player'),
-                'voter': voter,
-                'voters': result.get('voters', []),
-                'received': result.get('received', result.get('votes', 0)),
-                'remaining': result.get('remaining', 0)
-            }, room=code)
+            if vote < 0 or vote > 10:
+                return {'ok': False, 'error': 'Vote must be between 0 and 10.'}
 
-            if result.get("completed"):
-                self.emit('turn_completed', {
-                    'player': result['player'],
-                    'turn_type': result['turn_type'],
-                    'title': result['title'],
-                    'new_score': result['new_score']
+            if r.sismember(voted_set, voter):
+                return {'ok': False, 'error': 'You have already voted.'}
+
+            r.hset(byuser_hash, voter, vote)
+            r.sadd(voted_set, voter)
+
+            voted = sorted(list(r.smembers(voted_set)))
+            self.emit('vote_progress', {'voted': voted}, room=code)
+
+            meta = getattr(gc, "get_current_challenge_meta", lambda c: {}) (code) or {}
+            participants = []
+            try:
+                import json as _json
+                participants = _json.loads(meta.get('participants', '[]')) if isinstance(meta.get('participants'), str) else (meta.get('participants') or [])
+            except Exception:
+                participants = []
+
+            state = gc.get_lobby_state(code)
+            lobby_players = state.get('order', []) or []
+            if participants and len(participants) < len(lobby_players):
+                eligible = [p for p in lobby_players if p not in participants]
+            else:
+                eligible = list(lobby_players)
+
+            if len(voted) >= len(eligible) and len(eligible) > 0:
+                all_votes = r.hgetall(byuser_hash)
+                total_weight = 0
+                weighted_sum = 0
+                for user, vv in all_votes.items():
+                    try:
+                        v_int = int(vv)
+                    except Exception:
+                        continue
+                    w = gc.get_vote_weight(code, user)
+                    total_weight += w
+                    weighted_sum += v_int * w
+
+                avg = (weighted_sum / total_weight) if total_weight > 0 else 0.0
+
+                potential_prize = int(meta.get('prize') or 0)
+                award_points = int(round(potential_prize * (avg / 10.0)))
+
+                performer = meta.get('performer')
+                if performer:
+                    new_score = gc.update_score(code, performer, award_points)
+                else:
+                    new_score = None
+
+                self.emit('vote_finished', {
+                    'average': avg,
+                    'award_points': award_points,
+                    'performer': performer,
+                    'new_score': new_score
                 }, room=code)
 
-                return {
-                    'ok': True,
-                    'completed': True,
-                    'player': result['player'],
-                    'average_vote': result['average_vote'],
-                    'awarded': result['awarded'],
-                    'new_score': result['new_score'],
-                    'votes': result['votes'],
-                    'voters': result.get('voters', [])
-                }
+                return {'ok': True, 'average': avg, 'award_points': award_points, 'performer': performer, 'new_score': new_score}
 
-            return {
-                'ok': True,
-                'completed': False,
-                'received': result['received'],
-                'remaining': result['remaining'],
-                'voters': result.get('voters', [])
-            }
+            return {'ok': True}
 
         except ValueError as e:
             return {'ok': False, 'error': str(e)}
@@ -689,78 +718,111 @@ class GameEvents(Namespace):
             self.emit('error', {'message': f'An error occurred while voting.\n{str(e)}'}, room=code)
             return {'ok': False, 'error': f'An error occurred while voting.\n{str(e)}'}
 
+
     def on_team_vote(self, data: dict):
         """
-        Vote to decide the winning team.
+        Vote to choose the winning team in a group/target challenge with teams>1.
+        Dictator's vote counts as double (adds +2 to the chosen team).
         """
         try:
             code = data['code'] = str(data['code'])
             voter = data['player_name']
             team = data['team']
         except KeyError:
-            return {'ok': False, 'error': 'Lobby code, player username and team are required.'}
-        
-        schema = VoteTeamSchema()
-        try:
-            data = schema.load(data)
-        except ValidationError as e:
-            return {'ok': False, 'error': str(e)}
+            return {'ok': False, 'error': 'Lobby code, player_name and team are required to vote the team.'}
 
         gc: GameController = current_app.extensions['game_controller']
+        r = gc.redis
+
         try:
-            res = gc.cast_team_vote(code, voter, team)
-            if not res.get("completed"):
-                self.emit('team_vote_progress', {
-                    'voter': voter,
-                    'received': res.get('received', 0),
-                    'remaining': res.get('remaining', 0),
-                    'voters': res.get('voters', [])
+            # Keys
+            base = f"lobby:{code}:vote:team"
+            voted_set = f"{base}:voted"
+            byuser_hash = f"{base}:byuser"
+            counts_hash = f"{base}:counts"
+
+            if r.sismember(voted_set, voter):
+                return {'ok': False, 'error': 'You have already voted.'}
+
+            if not isinstance(team, str) or not team.startswith("Team"):
+                return {'ok': False, 'error': 'Invalid team value.'}
+
+            r.hset(byuser_hash, voter, team)
+            r.sadd(voted_set, voter)
+
+            weight = gc.get_vote_weight(code, voter)
+            r.hincrby(counts_hash, team, weight)
+
+            voted = sorted(list(r.smembers(voted_set)))
+            current_counts = {k: int(v) for k, v in r.hgetall(counts_hash).items()}
+            self.emit('team_vote_progress', {'voted': voted, 'counts': current_counts}, room=code)
+
+            meta = getattr(gc, "get_current_challenge_meta", lambda c: {}) (code) or {}
+            participants = []
+            try:
+                import json as _json
+                participants = _json.loads(meta.get('participants', '[]')) if isinstance(meta.get('participants'), str) else (meta.get('participants') or [])
+            except Exception:
+                participants = []
+
+            state = gc.get_lobby_state(code)
+            lobby_players = state.get('order', []) or []
+            if participants and len(participants) < len(lobby_players):
+                eligible = [p for p in lobby_players if p not in participants]
+            else:
+                eligible = list(lobby_players)
+
+            if len(voted) >= len(eligible) and len(eligible) > 0:
+                counts = {k: int(v) for k, v in r.hgetall(counts_hash).items()}
+                if not counts:
+                    return {'ok': True}
+
+                max_count = max(counts.values())
+                top = [team_name for team_name, c in counts.items() if c == max_count]
+
+                if len(top) == 1:
+                    winner = top[0]
+                else:
+                    import json as _json
+                    teams_struct = []
+                    try:
+                        teams_struct = _json.loads(meta.get('teams', '[]')) if isinstance(meta.get('teams'), str) else (meta.get('teams') or [])
+                    except Exception:
+                        teams_struct = []
+
+                    def avg_points(team_name: str) -> float:
+                        members = []
+                        for t in teams_struct:
+                            if t.get("name") == team_name:
+                                members = list(t.get("members") or [])
+                                break
+                        if not members:
+                            return float('inf')
+                        total = 0
+                        for m in members:
+                            try:
+                                total += gc.get_player_state(code, m).points
+                            except Exception:
+                                pass
+                        return total / max(1, len(members))
+
+                    winner = min(top, key=lambda tn: avg_points(tn))
+
+                self.emit('team_vote_finished', {
+                    'winner_team': winner,
+                    'counts': counts
                 }, room=code)
-                return {'ok': True, 'completed': False, 'received': res.get('received', 0), 'remaining': res.get('remaining', 0)}
 
-            winner = res['winner']
-            self.emit('team_vote_completed', {'winner': winner}, room=code)
+                return {'ok': True, 'winner_team': winner, 'counts': counts}
 
-            meta = gc.get_current_challenge_meta(code)
-            voting_flag = bool(json.loads(meta.get("voting"))) if meta.get("voting") is not None else False
-            prize = int(meta.get("prize", 0))
-            title = meta.get("title")
-            turn_now = meta.get("turn_type")
-            teams = json.loads(meta.get("teams", "[]")) if meta.get("teams") else []
-            awardees = next((t['members'] for t in teams if t['name'] == winner), [])
-
-            if voting_flag:
-                gc.begin_vote_session(code,
-                    performer_label=winner,
-                    turn_type=turn_now,
-                    title=title,
-                    potential_prize=prize,
-                    awardees=awardees
-                )
-                self.emit('turn_completed_needs_voting', {
-                    'player': winner,
-                    'turn_type': turn_now,
-                    'title': title,
-                    'potential_prize': prize,
-                    'participants': awardees
-                }, room=code)
-                return {'ok': True, 'completed': True, 'winner': winner, 'voting': True, 'potential_prize': prize}
-
-            totals = gc.award_points_to(code, awardees, prize)
-            self.emit('turn_completed', {
-                'player': winner,
-                'turn_type': turn_now,
-                'title': title,
-                'new_scores': totals
-            }, room=code)
-            gc.clear_current_challenge_meta(code)
-            return {'ok': True, 'completed': True, 'winner': winner, 'voting': False}
+            return {'ok': True}
 
         except ValueError as e:
             return {'ok': False, 'error': str(e)}
         except Exception as e:
-            self.emit('error', {'message': f'An error occurred during team voting.\n{str(e)}'}, room=code)
-            return {'ok': False, 'error': f'An error occurred during team voting.\n{str(e)}'}
+            self.emit('error', {'message': f'An error occurred while team voting.\n{str(e)}'}, room=code)
+            return {'ok': False, 'error': f'An error occurred while team voting.\n{str(e)}'}
+
 
     def on_give_points(self, data: dict):
         """Give points to a player."""
@@ -794,3 +856,116 @@ class GameEvents(Namespace):
         except Exception as e:
             self.emit('error', {'message': f'An error occurred while giving points.\n{str(e)}'}, room=code)
             return {'ok': False, 'error': f'An error occurred while giving points.\n{str(e)}'}
+        
+    def on_judge_secret_mission(self, data: dict):
+        """
+        Judge validates a player's secret mission (success/fail).
+        Applies prize or punishment and removes the mission from the player's list.
+        """
+        try:
+            code = data['code'] = str(data['code'])
+            judge_name = data['judge_name']
+            player_name = data['player_name']
+            mission_title = data['mission_title']
+            success = bool(data['success'])
+        except KeyError:
+            return {'ok': False, 'error': 'code, judge_name, player_name, mission_title and success are required.'}
+
+        schema = JudgeSecretMissionSchema()
+        try:
+            data = schema.load(data)
+        except ValidationError as e:
+            return {'ok': False, 'error': str(e)}
+
+        gc: GameController = current_app.extensions['game_controller']
+        try:
+            new_score, delta = gc.judge_secret_mission(code, judge_name, player_name, mission_title, success)
+            payload = {
+                'player': player_name,
+                'mission_title': mission_title,
+                'success': success,
+                'points_applied': delta,
+                'new_score': new_score,
+                'judged_by': judge_name
+            }
+            self.emit('secret_mission_judged', payload, room=code)
+            return {'ok': True, **payload}
+        except ValueError as e:
+            return {'ok': False, 'error': str(e)}
+        except Exception as e:
+            self.emit('error', {'message': f'An error occurred while judging secret mission.\n{str(e)}'}, room=code)
+            return {'ok': False, 'error': f'An error occurred while judging secret mission.\n{str(e)}'}
+
+    def on_detective_guess_role(self, data: dict):
+        """
+        Detective guesses someone else's role.
+        +200 if correct, -200 and 60s cooldown if wrong.
+        Broadcast does NOT reveal who the detective is.
+        """
+        try:
+            code = data['code'] = str(data['code'])
+            detective_name = data['detective_name']
+            target_player = data['target_player']
+            guessed_role = data['guessed_role']
+        except KeyError:
+            return {'ok': False, 'error': 'code, detective_name, target_player, guessed_role are required.'}
+
+        schema = DetectiveGuessSchema()
+        try:
+            data = schema.load(data)
+        except ValidationError as e:
+            return {'ok': False, 'error': str(e)}
+
+        gc: GameController = current_app.extensions['game_controller']
+        try:
+            correct, delta, new_score = gc.detective_guess_role(code, detective_name, target_player, guessed_role)
+            self.emit('detective_guess_result', {
+                'target_player': target_player,
+                'guessed_role': guessed_role,
+                'correct': correct
+            }, room=code)
+            return {
+                'ok': True,
+                'correct': correct,
+                'points_delta': delta,
+                'new_score': new_score
+            }
+        except ValueError as e:
+            return {'ok': False, 'error': str(e)}
+        except Exception as e:
+            self.emit('error', {'message': f'An error occurred while guessing role.\n{str(e)}'}, room=code)
+            return {'ok': False, 'error': f'An error occurred while guessing role.\n{str(e)}'}
+
+    def on_get_role_info(self, data: dict):
+        """Return role title + description (Tortolitos description rendered with partner)."""
+        try:
+            code = data['code'] = str(data['code'])
+            username = data['player_name']
+        except KeyError:
+            return {'ok': False, 'error': 'Lobby code and player_name are required to get role info.'}
+
+        gc: GameController = current_app.extensions['game_controller']
+        try:
+            info = gc.get_role_info(code, username)
+            return {'ok': True, 'role': info}
+        except ValueError as e:
+            return {'ok': False, 'error': str(e)}
+        except Exception as e:
+            return {'ok': False, 'error': f'An error occurred while retrieving role info.\n{str(e)}'}
+
+    def on_get_player_secret_missions(self, data: dict):
+        """Return the pending secret missions (title, description, prize, punishment) for a player."""
+        try:
+            code = data['code'] = str(data['code'])
+            username = data['player_name']
+        except KeyError:
+            return {'ok': False, 'error': 'Lobby code and player_name are required to get player secret missions.'}
+
+        gc: GameController = current_app.extensions['game_controller']
+        try:
+            missions = gc.get_player_secret_missions(code, username)
+            return {'ok': True, 'missions': missions}
+        except ValueError as e:
+            return {'ok': False, 'error': str(e)}
+        except Exception as e:
+            return {'ok': False, 'error': f'An error occurred while retrieving secret missions.\n{str(e)}'}

@@ -334,3 +334,40 @@ class RestrictionAdapter:
         It is expected that after choose_target the slots will appear as {Andreea}, {Uri}, ...
         """
         return [m.group(1).strip() for m in re.finditer(r'\{([^}]+)\}', final_desc)]
+    
+    @staticmethod
+    def render_role_description_for_player(
+        role_title: str,
+        description: str,
+        lobby_code: str,
+        player_name: str,
+        gc
+    ) -> str:
+        """
+        For 'Tortolitos', replaces {player} with the partner:
+          - If there are >2 Tortolitos, pick any other (first).
+          - If there is only 1 Tortolitos, pick a random other player in lobby.
+        For any other role, returns description unchanged.
+        """
+        if (role_title or "").strip().lower() != "tortolitos":
+            return description or ""
+
+        try:
+            state = gc.get_lobby_state(lobby_code)
+            order = state.get("order", []) or []
+            tortos = [u for u in order if (gc.get_player_state(lobby_code, u).role or "").strip().lower() == "tortolitos"]
+
+            partner = None
+            others = [u for u in tortos if u != player_name]
+            if others:
+                partner = others[0]
+            else:
+                for u in order:
+                    if u != player_name:
+                        partner = u
+                        break
+
+            replace_with = partner or "<no pair>"
+            return (description or "").replace("{player}", replace_with)
+        except Exception:
+            return description or ""
