@@ -1009,6 +1009,10 @@ class GameEvents(Namespace):
         gc: GameController = current_app.extensions['game_controller']
         try:
             info = gc.get_role_info(code, username)
+
+            role_title = (info.get('title') or '')
+            info['picture_url'] = self._challenge_pic_url(role_title, 'role')
+
             return {'ok': True, 'role': info}
         except ValueError as e:
             return {'ok': False, 'error': str(e)}
@@ -1016,7 +1020,7 @@ class GameEvents(Namespace):
             return {'ok': False, 'error': f'An error occurred while retrieving role info.\n{str(e)}'}
 
     def on_get_player_secret_missions(self, data: dict):
-        """Return the pending secret missions (title, description, prize, punishment) for a player."""
+        """Return the pending secret missions for a player."""
         try:
             code = data['code'] = str(data['code'])
             username = data['player_name']
@@ -1026,6 +1030,11 @@ class GameEvents(Namespace):
         gc: GameController = current_app.extensions['game_controller']
         try:
             missions = gc.get_player_secret_missions(code, username)
+
+            for m in missions:
+                title = (m.get('title') or '')
+                m['picture_url'] = self._challenge_pic_url(title, 'secret_mission')
+
             return {'ok': True, 'missions': missions}
         except ValueError as e:
             return {'ok': False, 'error': str(e)}
