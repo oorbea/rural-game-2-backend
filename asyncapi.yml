@@ -4,7 +4,7 @@ info:
   version: '{{API_VERSION}}'
   description: |
     Real-time API for lobby management and game control in Rural Game 2.
-    This AsyncAPI describes the Socket.IO namespace for lobbies, players, turns, and voting flows.
+    This AsyncAPI describes the Socket.IO namespace for lobbies, players, turns, voting flows, and utility events.
 
 servers:
   production:
@@ -191,6 +191,30 @@ channels:
           - $ref: '#/components/schemas/AckOkOnly'
           - $ref: '#/components/schemas/AckError'
 
+  get_player_state:
+    description: Client requests the current dynamic state of a player in a lobby.
+    publish:
+      operationId: getPlayerState
+      summary: Retrieve a player's dynamic state (points, role, secret_missions, connected).
+      message:
+        $ref: '#/components/messages/GetPlayerState'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckGetPlayerStateSuccess'
+          - $ref: '#/components/schemas/AckError'
+
+  give_points:
+    description: Client awards (or deducts) points to a player. Server broadcasts the change.
+    publish:
+      operationId: givePoints
+      summary: Adjust a player's score by a signed integer (positive or negative).
+      message:
+        $ref: '#/components/messages/GivePoints'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckOkOnly'
+          - $ref: '#/components/schemas/AckError'
+
   # ======================
   # Server -> Client (subscribe)
   # ======================
@@ -325,6 +349,14 @@ channels:
       message:
         $ref: '#/components/messages/TurnCompleted'
 
+  points_given:
+    description: Broadcast when points are directly awarded to a player via give_points.
+    subscribe:
+      operationId: pointsGiven
+      summary: Receive who got points, how many, and their new score.
+      message:
+        $ref: '#/components/messages/PointsGiven'
+
   error:
     description: Error notifications related to lobby or game operations.
     subscribe:
@@ -348,12 +380,12 @@ components:
       examples:
         - payload:
             player:
-              username: "Andreea"
+              username: "Alice"
               drinking: true
               smoking: false
-              partnered: true
+              partnered: false
               virgin: false
-              gender: 'female'
+              gender: male
 
     JoinLobby:
       name: JoinLobby
@@ -371,12 +403,12 @@ components:
         - payload:
             code: "1234"
             player:
-              username: "TrolloTron"
-              drinking: true
+              username: "Bob"
+              drinking: false
               smoking: false
               partnered: true
               virgin: false
-              gender: 'male'
+              gender: female
 
     LeaveLobby:
       name: LeaveLobby
@@ -392,7 +424,7 @@ components:
             type: string
             description: Username of the player leaving.
       examples:
-        - payload: { code: "1234", player_name: "Andreea" }
+        - payload: { code: "1234", player_name: "Alice" }
 
     StartGame:
       name: StartGame
@@ -408,7 +440,7 @@ components:
             type: string
             description: Host username who is starting the game.
       examples:
-        - payload: { code: "1234", player_name: "Andreea" }
+        - payload: { code: "1234", player_name: "Alice" }
 
     UpdatePlayer:
       name: UpdatePlayer
@@ -437,8 +469,8 @@ components:
       examples:
         - payload:
             code: "1234"
-            current_username: "TrolloTron"
-            new_username: "Uri"
+            current_username: "Bob"
+            new_username: "Rob"
 
     UpdateProfilePicture:
       name: UpdateProfilePicture
@@ -449,7 +481,7 @@ components:
       examples:
         - payload:
             code: "1234"
-            player_name: "Andreea"
+            player_name: "Alice"
             data_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAA..."
 
     GetUserInfo:
@@ -465,7 +497,7 @@ components:
           player_name:
             type: string
       examples:
-        - payload: { code: "1234", player_name: "Andreea" }
+        - payload: { code: "1234", player_name: "Alice" }
 
     NextTurn:
       name: NextTurn
@@ -497,7 +529,7 @@ components:
       examples:
         - payload:
             code: "1234"
-            description: "Make {Andreea} and {Uri} sing a duet."
+            description: "Make {Alice} and {Rob} sing a duet."
 
     SkipOrCompleteTurn:
       name: SkipOrCompleteTurn
@@ -514,7 +546,7 @@ components:
       examples:
         - payload:
             code: "1234"
-            player_name: "Andreea"
+            player_name: "Alice"
             turn_type: "group_challenge_type"
             title: "Water flip challenge"
 
@@ -533,7 +565,7 @@ components:
             minimum: 0
             maximum: 10
       examples:
-        - payload: { code: "1234", player_name: "Uri", vote: 8 }
+        - payload: { code: "1234", player_name: "Rob", vote: 8 }
 
     TeamVote:
       name: TeamVote
@@ -550,6 +582,37 @@ components:
             description: Team identifier (e.g., Team0, Team1)
       examples:
         - payload: { code: "1234", player_name: "Eve", team: "Team0" }
+
+    GetPlayerState:
+      name: GetPlayerState
+      title: Get Player State
+      summary: Request the dynamic state of a player in a lobby.
+      payload:
+        type: object
+        required: [code, player_name]
+        properties:
+          code: { $ref: '#/components/schemas/LobbyCode' }
+          player_name: { type: string }
+      examples:
+        - payload: { code: "1234", player_name: "Alice" }
+
+    GivePoints:
+      name: GivePoints
+      title: Give Points
+      summary: Adjust a player's score by a signed integer; emits points_given on success.
+      payload:
+        type: object
+        required: [code, player_name, points]
+        properties:
+          code: { $ref: '#/components/schemas/LobbyCode' }
+          player_name:
+            type: string
+            description: Receiver username
+          points:
+            type: integer
+            description: Positive to award, negative to deduct
+      examples:
+        - payload: { code: "1234", player_name: "Rob", points: 15 }
 
     PlayerJoined:
       name: PlayerJoined
@@ -582,7 +645,7 @@ components:
             type: string
             nullable: true
       examples:
-        - payload: { player: "Charlie", host: "Andreea" }
+        - payload: { player: "Charlie", host: "Alice" }
 
     GameStarted:
       name: GameStarted
@@ -654,13 +717,13 @@ components:
       examples:
         - payload:
             turn_type: group_challenge_type
-            player: "Andreea"
-            participants: ["Andreea", "Uri"]
+            player: "Alice"
+            participants: ["Alice", "Rob"]
             teams:
               - name: Team0
-                members: ["Andreea"]
+                members: ["Alice"]
               - name: Team1
-                members: ["Uri"]
+                members: ["Rob"]
             challenge:
               title: "Bottle flip"
               description: "Team duel between {player0:T0} and {player1:T1}"
@@ -685,8 +748,8 @@ components:
       examples:
         - payload:
             turn_type: secret_mission_type
-            player: "Andreea"
-            participants: ["Andreea"]
+            player: "Alice"
+            participants: ["Alice"]
 
     TargetChosen:
       name: TargetChosen
@@ -846,6 +909,22 @@ components:
           turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
           title: { type: string }
           new_score: { type: integer }
+
+    PointsGiven:
+      name: PointsGiven
+      title: Points Given
+      summary: Broadcast after a successful give_points operation.
+      payload:
+        type: object
+        required: [player, points, new_score]
+        properties:
+          player: { type: string }
+          points:
+            type: integer
+            description: Positive if awarded, negative if deducted
+          new_score: { type: integer }
+      examples:
+        - payload: { player: "Rob", points: 15, new_score: 87 }
 
     Error:
       name: Error
@@ -1086,3 +1165,11 @@ components:
         ok: { type: boolean, const: true }
         potential_prize: { type: integer }
         voting: { type: boolean, const: true }
+
+    AckGetPlayerStateSuccess:
+      type: object
+      description: Returned by get_player_state with the player's dynamic state.
+      required: [ok, player_state]
+      properties:
+        ok: { type: boolean, const: true }
+        player_state: { $ref: '#/components/schemas/PlayerState' }
