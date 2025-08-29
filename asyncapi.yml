@@ -384,6 +384,15 @@ channels:
       message:
         $ref: '#/components/messages/TeamVoteFinished'
 
+  secret_mission_judged:
+    description: Broadcast when a Judge validates a player's secret mission (success/fail) and points are applied.
+    subscribe:
+      operationId: secretMissionJudged
+      summary: Receive the result of a judged secret mission, including points delta and the new player score.
+      message:
+        $ref: '#/components/messages/SecretMissionJudged'
+
+
   points_given:
     description: Broadcast when points are added/subtracted to a player.
     subscribe:
@@ -919,6 +928,34 @@ components:
           player: { type: string }
           points: { type: integer }
           new_score: { type: integer }
+
+    SecretMissionJudged:
+      name: SecretMissionJudged
+      title: Secret Mission Judged
+      summary: Notification sent after a Judge validates a player's secret mission. Includes success/fail, points applied and the player's new score.
+      payload:
+        type: object
+        required: [player, mission_title, success, points_applied, new_score, judged_by]
+        properties:
+          player:
+            type: string
+            description: Username of the player whose secret mission was judged.
+          mission_title:
+            type: string
+            description: Title of the secret mission that was judged.
+          success:
+            type: boolean
+            description: Whether the mission was validated as successful (true) or failed (false).
+          points_applied:
+            type: integer
+            description: Positive or negative points applied to the player as a result of the judgment.
+          new_score:
+            type: integer
+            description: Player's total score after applying the judgment.
+          judged_by:
+            type: string
+            description: Username of the Judge who performed the validation.
+
 
     GameFinished:
       name: GameFinished
