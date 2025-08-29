@@ -4,7 +4,8 @@ info:
   version: '{{API_VERSION}}'
   description: |
     Real-time API for lobby management and game control in Rural Game 2.
-    This AsyncAPI describes the Socket.IO namespace for lobbies, players, turns, voting flows, and utility events.
+    Socket.IO events for lobbies, players, turns, voting and team selection.
+    Client emits (publish) include Socket.IO acks documented via x-ack.
 
 servers:
   production:
@@ -25,10 +26,6 @@ servers:
         description: API prefix (namespace root)
 
 channels:
-  # ======================
-  # Client -> Server (publish)
-  # ======================
-
   create_lobby:
     description: Client requests to create a new lobby.
     publish:
@@ -113,6 +110,30 @@ channels:
           - $ref: '#/components/schemas/AckGetUserInfoSuccess'
           - $ref: '#/components/schemas/AckError'
 
+  get_player_state:
+    description: Client requests to get a player's dynamic state (points, role, missions, connected).
+    publish:
+      operationId: getPlayerState
+      summary: Retrieve dynamic PlayerState for a player in a lobby.
+      message:
+        $ref: '#/components/messages/GetPlayerState'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckGetPlayerStateSuccess'
+          - $ref: '#/components/schemas/AckError'
+
+  give_points:
+    description: Client requests to add/subtract points for a player.
+    publish:
+      operationId: givePoints
+      summary: Add (positive) or subtract (negative) points to a player's score.
+      message:
+        $ref: '#/components/messages/GivePoints'
+      x-ack:
+        oneOf:
+          - $ref: '#/components/schemas/AckOkOnly'
+          - $ref: '#/components/schemas/AckError'
+
   next_turn:
     description: Client requests to progress to the next turn with a given turn type.
     publish:
@@ -123,18 +144,18 @@ channels:
       x-ack:
         description: |
           Ack varies by turn type:
-            - challenge_type, group_challenge_type => { ok: true }
-            - secret_mission_type, target_challenge_type => { ok: true, challenge: {...} }
+            - challenge, group_challenge => { ok: true }
+            - secret_mission, target_challenge => { ok: true, challenge: {...} }
         oneOf:
           - $ref: '#/components/schemas/AckOkOnly'
           - $ref: '#/components/schemas/AckNextTurnChallengeSuccess'
           - $ref: '#/components/schemas/AckError'
 
   choose_target:
-    description: Client selects players for a target challenge (replaces placeholders in description).
+    description: Client selects actual participants for the current target challenge (non-random).
     publish:
       operationId: chooseTarget
-      summary: Submit the final description with chosen target players.
+      summary: Choose concrete usernames for the candidate slots in a target challenge.
       message:
         $ref: '#/components/messages/ChooseTarget'
       x-ack:
@@ -143,84 +164,71 @@ channels:
           - $ref: '#/components/schemas/AckError'
 
   skip_turn:
-    description: Client requests to skip a challenge (if skipping is allowed).
+    description: Client requests to skip the current challenge (if skippable).
     publish:
       operationId: skipTurn
-      summary: Skip the current challenge; only the requester gets the penalty if involved.
+      summary: Skip current challenge; applies penalty to the skipping player.
       message:
-        $ref: '#/components/messages/SkipOrCompleteTurn'
+        $ref: '#/components/messages/SkipOrComplete'
       x-ack:
         oneOf:
           - $ref: '#/components/schemas/AckOkOnly'
           - $ref: '#/components/schemas/AckError'
 
   complete_turn:
-    description: Client confirms a challenge has been completed.
+    description: Client marks the current challenge as completed.
     publish:
       operationId: completeTurn
-      summary: Complete the challenge; if voting is required, server starts the voting flow.
+      summary: Complete the challenge; returns prize or triggers performance voting.
       message:
-        $ref: '#/components/messages/SkipOrCompleteTurn'
+        $ref: '#/components/messages/SkipOrComplete'
       x-ack:
         oneOf:
-          - $ref: '#/components/schemas/AckCompleteTurnVoting'
+          - $ref: '#/components/schemas/AckCompleteTurnNeedsVoting'
           - $ref: '#/components/schemas/AckOkOnly'
           - $ref: '#/components/schemas/AckError'
 
   vote:
-    description: Client submits a performance vote (0..10) for the last completed turn that needs voting.
+    description: |
+      Client votes a performance from 0..10.  
+      **Dictator role counts as double** (equivalent to submitting two identical votes), but storage keeps one record per voter; the double weight is only applied in the tally.
+      Eligible voters: whole lobby except participants, unless everyone participates (then everyone votes).
     publish:
       operationId: vote
-      summary: Submit a performance vote. Ineligible voters are rejected server-side.
+      summary: Submit a performance vote (0..10).
       message:
         $ref: '#/components/messages/Vote'
       x-ack:
+        description: |
+          Returns `{ ok: true }` while voting is still open, or the final average & award when voting closes.
         oneOf:
           - $ref: '#/components/schemas/AckOkOnly'
+          - $ref: '#/components/schemas/AckVoteFinished'
           - $ref: '#/components/schemas/AckError'
 
   team_vote:
-    description: Client selects the winning team when a group challenge has multiple teams.
+    description: |
+      Client votes for the winning team (`Team0`, `Team1`, ...).  
+      **Dictator role counts as double** (adds +2 to the chosen team).  
+      Eligible voters: whole lobby except participants, unless everyone participates.
     publish:
       operationId: teamVote
-      summary: Submit a vote for the winning team (e.g., "Team0"). If all participate, the whole lobby votes.
+      summary: Submit a team vote.
       message:
         $ref: '#/components/messages/TeamVote'
       x-ack:
+        description: |
+          Returns `{ ok: true }` while voting is still open, or the final winner when voting closes.
         oneOf:
           - $ref: '#/components/schemas/AckOkOnly'
+          - $ref: '#/components/schemas/AckTeamVoteFinished'
           - $ref: '#/components/schemas/AckError'
 
-  get_player_state:
-    description: Client requests the current dynamic state of a player in a lobby.
-    publish:
-      operationId: getPlayerState
-      summary: Retrieve a player's dynamic state (points, role, secret_missions, connected).
-      message:
-        $ref: '#/components/messages/GetPlayerState'
-      x-ack:
-        oneOf:
-          - $ref: '#/components/schemas/AckGetPlayerStateSuccess'
-          - $ref: '#/components/schemas/AckError'
-
-  give_points:
-    description: Client awards (or deducts) points to a player. Server broadcasts the change.
-    publish:
-      operationId: givePoints
-      summary: Adjust a player's score by a signed integer (positive or negative).
-      message:
-        $ref: '#/components/messages/GivePoints'
-      x-ack:
-        oneOf:
-          - $ref: '#/components/schemas/AckOkOnly'
-          - $ref: '#/components/schemas/AckError'
-
-  # ======================
-  # Server -> Client (subscribe)
-  # ======================
-
+  # -------------------------
+  # Server -> client messages
+  # -------------------------
   player_joined:
-    description: Notification when a player joins a lobby.
+    description: Notification sent when a player joins a lobby.
     subscribe:
       operationId: playerJoined
       summary: Receive information about the player that just joined.
@@ -228,7 +236,7 @@ channels:
         $ref: '#/components/messages/PlayerJoined'
 
   player_left:
-    description: Notification when a player leaves a lobby.
+    description: Notification sent when a player leaves a lobby.
     subscribe:
       operationId: playerLeft
       summary: Receive information about the player that just left.
@@ -236,7 +244,7 @@ channels:
         $ref: '#/components/messages/PlayerLeft'
 
   game_started:
-    description: Notification when the game starts.
+    description: Notification sent when the game starts.
     subscribe:
       operationId: gameStarted
       summary: Receive the initial game state after the game has started.
@@ -244,7 +252,7 @@ channels:
         $ref: '#/components/messages/GameStarted'
 
   player_updated:
-    description: Notification when a player updates their information.
+    description: Notification sent when a player updates their information.
     subscribe:
       operationId: playerUpdated
       summary: Receive updated player information after a player update.
@@ -252,108 +260,92 @@ channels:
         $ref: '#/components/messages/PlayerUpdated'
 
   profile_picture_updated:
-    description: Notification when a player's profile picture is updated or removed.
+    description: Notification sent when a player's profile picture is updated or removed.
     subscribe:
       operationId: profilePictureUpdated
       summary: Receive the new profile picture URL (or removal flag).
       message:
         $ref: '#/components/messages/ProfilePictureUpdated'
 
-  next_turn_type:
-    description: Broadcast announcing the next turn type right before resolving the challenge.
-    subscribe:
-      operationId: nextTurnType
-      summary: Receive the next turn type (challenge / group_challenge / secret_mission / target_challenge).
-      message:
-        $ref: '#/components/messages/NextTurnType'
-
   following_turn:
-    description: Broadcast with the next turn info (always includes participants; teams if any).
+    description: Broadcast with the next turn info. Always includes participants; for team challenges includes `teams`.
     subscribe:
       operationId: followingTurn
-      summary: Receive the upcoming turn data (type, player, optional challenge, participants, and teams).
+      summary: Receive the upcoming turn data (type, player, participants and optionally teams/challenge).
       message:
         oneOf:
           - $ref: '#/components/messages/FollowingTurnWithChallenge'
           - $ref: '#/components/messages/FollowingTurnWithoutChallenge'
 
   target_chosen:
-    description: Broadcast when the target description is finalized for a target challenge.
+    description: Broadcast after client chooses concrete participants for a target challenge.
     subscribe:
       operationId: targetChosen
-      summary: Receive the finalized description and the performer.
+      summary: Receive the final assignment for target challenge participants.
       message:
         $ref: '#/components/messages/TargetChosen'
 
   turn_skipped:
-    description: Broadcast when a turn has been skipped.
+    description: Broadcast when a turn is skipped.
     subscribe:
       operationId: turnSkipped
-      summary: Receive who skipped, turn type, title and resulting score.
+      summary: Receive info about the skipping player and new score.
       message:
         $ref: '#/components/messages/TurnSkipped'
 
   turn_completed_needs_voting:
-    description: Broadcast when a completed turn requires performance voting (0..10).
+    description: Broadcast when a completed turn requires performance voting.
     subscribe:
       operationId: turnCompletedNeedsVoting
-      summary: Receive the potential prize and the turn metadata to start voting.
+      summary: Receive info to start performance voting.
       message:
         $ref: '#/components/messages/TurnCompletedNeedsVoting'
 
-  vote_progress:
-    description: Broadcast vote progress for performance voting (who already voted).
-    subscribe:
-      operationId: voteProgress
-      summary: Receive the list of voters and pending voters for the current performance vote.
-      message:
-        $ref: '#/components/messages/VoteProgress'
-
-  vote_result:
-    description: Broadcast final performance voting result and awarded points.
-    subscribe:
-      operationId: voteResult
-      summary: Receive awarded points and updated scores when performance voting closes.
-      message:
-        $ref: '#/components/messages/VoteResult'
-
-  team_vote_started:
-    description: Broadcast when a team-winner vote is required (group challenge with multiple teams).
-    subscribe:
-      operationId: teamVoteStarted
-      summary: Receive eligible voters and available teams to pick (Team0, Team1, ...).
-      message:
-        $ref: '#/components/messages/TeamVoteStarted'
-
-  team_vote_progress:
-    description: Broadcast vote progress for the team-winner selection.
-    subscribe:
-      operationId: teamVoteProgress
-      summary: Receive who already voted and who is pending for team-winner selection.
-      message:
-        $ref: '#/components/messages/TeamVoteProgress'
-
-  team_vote_result:
-    description: Broadcast the winning team and its members after team voting closes.
-    subscribe:
-      operationId: teamVoteResult
-      summary: Receive the winning team (TeamX) and members.
-      message:
-        $ref: '#/components/messages/TeamVoteResult'
-
   turn_completed:
-    description: Broadcast when a turn was completed and no voting was needed OR after voting is applied and scores updated.
+    description: Broadcast when a completed turn gives immediate points (no voting).
     subscribe:
       operationId: turnCompleted
-      summary: Receive the player, type, title and the new score (or final awarded result).
+      summary: Receive awarded points and new score.
       message:
         $ref: '#/components/messages/TurnCompleted'
 
+  vote_progress:
+    description: Broadcast progress of performance votes (who already voted).
+    subscribe:
+      operationId: voteProgress
+      summary: Receive the list of voters that already voted for performance.
+      message:
+        $ref: '#/components/messages/VoteProgress'
+
+  vote_finished:
+    description: Broadcast after performance voting is closed and award assigned.
+    subscribe:
+      operationId: voteFinished
+      summary: Receive weighted average, award points and new performer score.
+      message:
+        $ref: '#/components/messages/VoteFinished'
+
+  team_vote_progress:
+    description: Broadcast progress of team votes (who voted + current weighted counts).
+    subscribe:
+      operationId: teamVoteProgress
+      summary: Receive current team vote tally and voters list.
+      message:
+        $ref: '#/components/messages/TeamVoteProgress'
+
+  team_vote_finished:
+    description: Broadcast when team voting is closed and a winner team is decided.
+    subscribe:
+      operationId: teamVoteFinished
+      summary: Receive the winning team and final weighted counts.
+      message:
+        $ref: '#/components/messages/TeamVoteFinished'
+
   points_given:
-    description: Broadcast when points are directly awarded to a player via give_points.
+    description: Broadcast when points are added/subtracted to a player.
     subscribe:
       operationId: pointsGiven
-      summary: Receive who got points, how many, and their new score.
+      summary: Receive the receiver, delta points and their new score.
       message:
         $ref: '#/components/messages/PointsGiven'
 
@@ -380,7 +372,7 @@ components:
       examples:
         - payload:
             player:
-              username: "Alice"
+              username: Alice
               drinking: true
               smoking: false
               partnered: false
@@ -395,20 +387,8 @@ components:
         type: object
         required: [code, player]
         properties:
-          code:
-            $ref: '#/components/schemas/LobbyCode'
-          player:
-            $ref: '#/components/schemas/PlayerInfo'
-      examples:
-        - payload:
-            code: "1234"
-            player:
-              username: "Bob"
-              drinking: false
-              smoking: false
-              partnered: true
-              virgin: false
-              gender: female
+          code: { $ref: '#/components/schemas/LobbyCode' }
+          player: { $ref: '#/components/schemas/PlayerInfo' }
 
     LeaveLobby:
       name: LeaveLobby
@@ -418,13 +398,10 @@ components:
         type: object
         required: [code, player_name]
         properties:
-          code:
-            $ref: '#/components/schemas/LobbyCode'
+          code: { $ref: '#/components/schemas/LobbyCode' }
           player_name:
             type: string
             description: Username of the player leaving.
-      examples:
-        - payload: { code: "1234", player_name: "Alice" }
 
     StartGame:
       name: StartGame
@@ -434,13 +411,10 @@ components:
         type: object
         required: [code, player_name]
         properties:
-          code:
-            $ref: '#/components/schemas/LobbyCode'
+          code: { $ref: '#/components/schemas/LobbyCode' }
           player_name:
             type: string
             description: Host username who is starting the game.
-      examples:
-        - payload: { code: "1234", player_name: "Alice" }
 
     UpdatePlayer:
       name: UpdatePlayer
@@ -450,27 +424,14 @@ components:
         type: object
         required: [code, current_username]
         properties:
-          code:
-            $ref: '#/components/schemas/LobbyCode'
-          current_username:
-            type: string
-          new_username:
-            type: string
-          drinking:
-            type: boolean
-          smoking:
-            type: boolean
-          partnered:
-            type: boolean
-          virgin:
-            type: boolean
-          gender:
-            $ref: '#/components/schemas/GenderEnum'
-      examples:
-        - payload:
-            code: "1234"
-            current_username: "Bob"
-            new_username: "Rob"
+          code: { $ref: '#/components/schemas/LobbyCode' }
+          current_username: { type: string }
+          new_username: { type: string }
+          drinking: { type: boolean }
+          smoking: { type: boolean }
+          partnered: { type: boolean }
+          virgin: { type: boolean }
+          gender: { $ref: '#/components/schemas/GenderEnum' }
 
     UpdateProfilePicture:
       name: UpdateProfilePicture
@@ -478,11 +439,6 @@ components:
       summary: Add/replace/remove a player's profile picture in a lobby.
       payload:
         $ref: '#/components/schemas/UpdateProfilePicturePayload'
-      examples:
-        - payload:
-            code: "1234"
-            player_name: "Alice"
-            data_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAA..."
 
     GetUserInfo:
       name: GetUserInfo
@@ -492,12 +448,33 @@ components:
         type: object
         required: [code, player_name]
         properties:
-          code:
-            $ref: '#/components/schemas/LobbyCode'
-          player_name:
-            type: string
-      examples:
-        - payload: { code: "1234", player_name: "Alice" }
+          code: { $ref: '#/components/schemas/LobbyCode' }
+          player_name: { type: string }
+
+    GetPlayerState:
+      name: GetPlayerState
+      title: Get Player State
+      summary: Retrieve PlayerState (points, role, missions, connected).
+      payload:
+        type: object
+        required: [code, player_name]
+        properties:
+          code: { $ref: '#/components/schemas/LobbyCode' }
+          player_name: { type: string }
+
+    GivePoints:
+      name: GivePoints
+      title: Give Points
+      summary: Add or subtract points to a player's score.
+      payload:
+        type: object
+        required: [code, player_name, points]
+        properties:
+          code: { $ref: '#/components/schemas/LobbyCode' }
+          player_name: { type: string }
+          points:
+            type: integer
+            description: Positive to add, negative to subtract.
 
     NextTurn:
       name: NextTurn
@@ -507,17 +484,13 @@ components:
         type: object
         required: [code, turn_type]
         properties:
-          code:
-            $ref: '#/components/schemas/LobbyCode'
-          turn_type:
-            $ref: '#/components/schemas/TurnTypeEnum'
-      examples:
-        - payload: { code: "1234", turn_type: "group_challenge_type" }
+          code: { $ref: '#/components/schemas/LobbyCode' }
+          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
 
     ChooseTarget:
       name: ChooseTarget
       title: Choose Target
-      summary: Client finalizes the target challenge description.
+      summary: Provide final usernames for candidate slots in target challenges.
       payload:
         type: object
         required: [code, description]
@@ -525,16 +498,12 @@ components:
           code: { $ref: '#/components/schemas/LobbyCode' }
           description:
             type: string
-            description: Final description with chosen names replacing the placeholders.
-      examples:
-        - payload:
-            code: "1234"
-            description: "Make {Alice} and {Rob} sing a duet."
+            description: Final description text with chosen usernames (e.g. "{player0} becomes Alice").
 
-    SkipOrCompleteTurn:
-      name: SkipOrCompleteTurn
-      title: Skip or Complete Turn
-      summary: Used by skip_turn and complete_turn.
+    SkipOrComplete:
+      name: SkipOrComplete
+      title: Skip or Complete
+      summary: Skip or complete a challenge.
       payload:
         type: object
         required: [code, player_name, turn_type, title]
@@ -543,17 +512,11 @@ components:
           player_name: { type: string }
           turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
           title: { type: string }
-      examples:
-        - payload:
-            code: "1234"
-            player_name: "Alice"
-            turn_type: "group_challenge_type"
-            title: "Water flip challenge"
 
     Vote:
       name: Vote
-      title: Performance Vote
-      summary: Client sends a performance vote (0..10) for the current voting turn.
+      title: Vote Performance
+      summary: Submit a performance vote (0..10). Dictator counts as double in tally.
       payload:
         type: object
         required: [code, player_name, vote]
@@ -565,12 +528,15 @@ components:
             minimum: 0
             maximum: 10
       examples:
-        - payload: { code: "1234", player_name: "Rob", vote: 8 }
+        - payload:
+            code: "1234"
+            player_name: "Bob"
+            vote: 7
 
     TeamVote:
       name: TeamVote
-      title: Team Winner Vote
-      summary: Client votes for the winning team (Team0, Team1, ...).
+      title: Vote Team
+      summary: Vote the winning team (e.g., Team0, Team1). Dictator adds +2 to the chosen team.
       payload:
         type: object
         required: [code, player_name, team]
@@ -579,40 +545,12 @@ components:
           player_name: { type: string }
           team:
             type: string
-            description: Team identifier (e.g., Team0, Team1)
+            pattern: '^Team[0-9]+$'
       examples:
-        - payload: { code: "1234", player_name: "Eve", team: "Team0" }
-
-    GetPlayerState:
-      name: GetPlayerState
-      title: Get Player State
-      summary: Request the dynamic state of a player in a lobby.
-      payload:
-        type: object
-        required: [code, player_name]
-        properties:
-          code: { $ref: '#/components/schemas/LobbyCode' }
-          player_name: { type: string }
-      examples:
-        - payload: { code: "1234", player_name: "Alice" }
-
-    GivePoints:
-      name: GivePoints
-      title: Give Points
-      summary: Adjust a player's score by a signed integer; emits points_given on success.
-      payload:
-        type: object
-        required: [code, player_name, points]
-        properties:
-          code: { $ref: '#/components/schemas/LobbyCode' }
-          player_name:
-            type: string
-            description: Receiver username
-          points:
-            type: integer
-            description: Positive to award, negative to deduct
-      examples:
-        - payload: { code: "1234", player_name: "Rob", points: 15 }
+        - payload:
+            code: "1234"
+            player_name: "Carol"
+            team: "Team1"
 
     PlayerJoined:
       name: PlayerJoined
@@ -627,10 +565,6 @@ components:
             type: string
             format: uri
             nullable: true
-      examples:
-        - payload:
-            player: "Charlie"
-            profile_picture_url: "http://localhost:5000/api/v1/lobby/1234/user/Charlie/profile-picture"
 
     PlayerLeft:
       name: PlayerLeft
@@ -644,8 +578,6 @@ components:
           host:
             type: string
             nullable: true
-      examples:
-        - payload: { player: "Charlie", host: "Alice" }
 
     GameStarted:
       name: GameStarted
@@ -684,22 +616,10 @@ components:
             nullable: true
           removed: { type: boolean }
 
-    NextTurnType:
-      name: NextTurnType
-      title: Next Turn Type
-      summary: Announces the next turn type.
-      payload:
-        type: object
-        required: [turn_type]
-        properties:
-          turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
-      examples:
-        - payload: { turn_type: "group_challenge_type" }
-
     FollowingTurnWithChallenge:
       name: FollowingTurnWithChallenge
       title: Following Turn (with challenge)
-      summary: Broadcast for challenge/group_challenge turns (includes participants and teams).
+      summary: Broadcast for challenge/group_challenge turns. Always includes participants; `teams` present when teams are defined.
       payload:
         type: object
         required: [turn_type, challenge, player, participants]
@@ -713,48 +633,48 @@ components:
           teams:
             type: array
             items: { $ref: '#/components/schemas/Team' }
-            description: Present only when the challenge uses teams (Team0, Team1, ...).
+            nullable: true
       examples:
         - payload:
             turn_type: group_challenge_type
-            player: "Alice"
-            participants: ["Alice", "Rob"]
+            player: Alice
+            participants: [Alice, Bob, Carol, Dave]
             teams:
               - name: Team0
-                members: ["Alice"]
+                members: [Alice, Bob]
               - name: Team1
-                members: ["Rob"]
+                members: [Carol, Dave]
             challenge:
-              title: "Bottle flip"
-              description: "Team duel between {player0:T0} and {player1:T1}"
-              icon: "http://localhost:5000/api/v1/group_challenge/icon?title=Bottle%20flip"
+              title: "Flip Cup"
+              description: "Team battle!"
+              group_challenge: true
+              prize: 100
+              voting: true
+              icon: "https://.../icon.png"
 
     FollowingTurnWithoutChallenge:
       name: FollowingTurnWithoutChallenge
       title: Following Turn (without challenge)
-      summary: Broadcast for secret_mission/target_challenge turns (includes participants array).
+      summary: Broadcast for secret_mission/target_challenge turns. Always includes participants (may be empty) and optionally team slots metadata (client-driven).
       payload:
         type: object
-        required: [turn_type, player]
+        required: [turn_type, player, participants]
         properties:
           turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
           player: { type: string }
           participants:
             type: array
             items: { type: string }
-          teams:
+          # Optional meta keys may be included depending on server logic:
+          slots:
             type: array
-            items: { $ref: '#/components/schemas/Team' }
-      examples:
-        - payload:
-            turn_type: secret_mission_type
-            player: "Alice"
-            participants: ["Alice"]
+            items: { type: string }
+            nullable: true
 
     TargetChosen:
       name: TargetChosen
       title: Target Chosen
-      summary: Broadcast when choose_target is accepted.
+      summary: Broadcast containing final description and current performer.
       payload:
         type: object
         required: [turn_type, description, player]
@@ -766,7 +686,7 @@ components:
     TurnSkipped:
       name: TurnSkipped
       title: Turn Skipped
-      summary: Broadcast when a turn is skipped.
+      summary: Broadcast when a player skips a turn.
       payload:
         type: object
         required: [player, turn_type, title, new_score]
@@ -779,7 +699,7 @@ components:
     TurnCompletedNeedsVoting:
       name: TurnCompletedNeedsVoting
       title: Turn Completed (needs voting)
-      summary: Broadcast when performance voting is required.
+      summary: Broadcast when a turn needs a performance vote, including the potential prize.
       payload:
         type: object
         required: [player, turn_type, title, potential_prize]
@@ -787,120 +707,12 @@ components:
           player: { type: string }
           turn_type: { $ref: '#/components/schemas/TurnTypeEnum' }
           title: { type: string }
-          potential_prize:
-            type: integer
-            description: Maximum prize before applying vote factor.
-
-    VoteProgress:
-      name: VoteProgress
-      title: Vote Progress
-      summary: Broadcast who has voted and who is pending (performance voting).
-      payload:
-        type: object
-        required: [kind, eligible_voters, voted, pending]
-        properties:
-          kind:
-            type: string
-            enum: [performance]
-          eligible_voters:
-            type: array
-            items: { type: string }
-          voted:
-            type: array
-            items: { type: string }
-          pending:
-            type: array
-            items: { type: string }
-          title:
-            type: string
-            description: Optional challenge title.
-          performer:
-            type: string
-            description: Optional performer username.
-
-    VoteResult:
-      name: VoteResult
-      title: Vote Result
-      summary: Broadcast final result of performance voting and awarded points.
-      payload:
-        type: object
-        required: [title, awarded, awarded_players]
-        properties:
-          title: { type: string }
-          awarded:
-            type: integer
-            description: Awarded points per eligible participant (same value for all if group team won).
-          awarded_players:
-            type: array
-            items:
-              type: object
-              required: [username, new_score]
-              properties:
-                username: { type: string }
-                new_score: { type: integer }
-          factor:
-            type: number
-            description: Vote factor in range [0, 1], derived from average(0..10)/10.
-          winning_team:
-            type: string
-            description: If group challenge with teams, the team that got the award.
-
-    TeamVoteStarted:
-      name: TeamVoteStarted
-      title: Team Vote Started
-      summary: Broadcast when a group challenge has multiple teams and a winner must be chosen.
-      payload:
-        type: object
-        required: [title, teams, eligible_voters]
-        properties:
-          title: { type: string }
-          teams:
-            type: array
-            items: { $ref: '#/components/schemas/Team' }
-          eligible_voters:
-            type: array
-            items: { type: string }
-
-    TeamVoteProgress:
-      name: TeamVoteProgress
-      title: Team Vote Progress
-      summary: Broadcast who has voted and who is pending (team winner selection).
-      payload:
-        type: object
-        required: [kind, eligible_voters, voted, pending]
-        properties:
-          kind:
-            type: string
-            enum: [team]
-          eligible_voters:
-            type: array
-            items: { type: string }
-          voted:
-            type: array
-            items: { type: string }
-          pending:
-            type: array
-            items: { type: string }
-          title: { type: string }
-
-    TeamVoteResult:
-      name: TeamVoteResult
-      title: Team Vote Result
-      summary: Broadcast the winning team and members after the team vote closes.
-      payload:
-        type: object
-        required: [title, winning_team, members]
-        properties:
-          title: { type: string }
-          winning_team: { type: string }
-          members:
-            type: array
-            items: { type: string }
+          potential_prize: { type: integer }
 
     TurnCompleted:
       name: TurnCompleted
       title: Turn Completed
-      summary: Broadcast when a turn is completed and (a) needed no voting or (b) voting is finished and scores updated.
+      summary: Broadcast when a turn finishes without voting; includes new score for the performer or team participants.
       payload:
         type: object
         required: [player, turn_type, title, new_score]
@@ -910,21 +722,88 @@ components:
           title: { type: string }
           new_score: { type: integer }
 
+    VoteProgress:
+      name: VoteProgress
+      title: Vote Progress
+      summary: List of players who have already voted for performance.
+      payload:
+        type: object
+        required: [voted]
+        properties:
+          voted:
+            type: array
+            items: { type: string }
+      examples:
+        - payload:
+            voted: [Bob, Carol]
+
+    VoteFinished:
+      name: VoteFinished
+      title: Vote Finished
+      summary: Final weighted average and awarded points (Dictator counts double).
+      payload:
+        type: object
+        required: [average, award_points]
+        properties:
+          average:
+            type: number
+            format: float
+          award_points:
+            type: integer
+          performer:
+            type: string
+            nullable: true
+          new_score:
+            type: integer
+            nullable: true
+
+    TeamVoteProgress:
+      name: TeamVoteProgress
+      title: Team Vote Progress
+      summary: Who voted and current weighted counts per team (Dictator adds +2).
+      payload:
+        type: object
+        required: [voted, counts]
+        properties:
+          voted:
+            type: array
+            items: { type: string }
+          counts:
+            type: object
+            additionalProperties:
+              type: integer
+      examples:
+        - payload:
+            voted: [Bob, Carol, Dave]
+            counts:
+              Team0: 3
+              Team1: 4
+
+    TeamVoteFinished:
+      name: TeamVoteFinished
+      title: Team Vote Finished
+      summary: Winner team and final weighted counts (Dictator adds +2).
+      payload:
+        type: object
+        required: [winner_team, counts]
+        properties:
+          winner_team: { type: string }
+          counts:
+            type: object
+            additionalProperties:
+              type: integer
+
     PointsGiven:
       name: PointsGiven
       title: Points Given
-      summary: Broadcast after a successful give_points operation.
+      summary: Notification that points were added/subtracted to a player.
       payload:
         type: object
         required: [player, points, new_score]
         properties:
           player: { type: string }
-          points:
-            type: integer
-            description: Positive if awarded, negative if deducted
+          points: { type: integer }
           new_score: { type: integer }
-      examples:
-        - payload: { player: "Rob", points: 15, new_score: 87 }
 
     Error:
       name: Error
@@ -955,17 +834,6 @@ components:
       type: string
       description: Type of turn to progress to.
       enum: [challenge_type, group_challenge_type, secret_mission_type, target_challenge_type]
-
-    Team:
-      type: object
-      required: [name, members]
-      properties:
-        name:
-          type: string
-          description: Team identifier (Team0, Team1, ...)
-        members:
-          type: array
-          items: { type: string }
 
     # -----------------------
     # Domain models
@@ -1028,14 +896,24 @@ components:
             males: { type: integer, minimum: 0 }
             females: { type: integer, minimum: 0 }
 
+    Team:
+      type: object
+      required: [name, members]
+      properties:
+        name: { type: string }
+        members:
+          type: array
+          items: { type: string }
+
     Challenge:
       type: object
       description: Generic challenge payload enriched by backend (includes icon URL).
       properties:
         title: { type: string }
         description: { type: string, nullable: true }
-        males: { type: integer, nullable: true }
-        females: { type: integer, nullable: true }
+        group_challenge: { type: boolean, default: false }
+        prize: { type: integer }
+        voting: { type: boolean, default: false }
         icon:
           type: string
           format: uri
@@ -1138,6 +1016,13 @@ components:
               type: string
               format: uri
 
+    AckGetPlayerStateSuccess:
+      type: object
+      required: [ok, player_state]
+      properties:
+        ok: { type: boolean, const: true }
+        player_state: { $ref: '#/components/schemas/PlayerState' }
+
     AckUpdateProfilePictureSuccess:
       type: object
       required: [ok, player, profile_picture_url, removed]
@@ -1157,19 +1042,35 @@ components:
         ok: { type: boolean, const: true }
         challenge: { $ref: '#/components/schemas/Challenge' }
 
-    AckCompleteTurnVoting:
+    AckCompleteTurnNeedsVoting:
       type: object
-      description: Returned by complete_turn when voting is required.
       required: [ok, potential_prize, voting]
       properties:
         ok: { type: boolean, const: true }
         potential_prize: { type: integer }
-        voting: { type: boolean, const: true }
+        voting: { type: boolean }
 
-    AckGetPlayerStateSuccess:
+    AckVoteFinished:
       type: object
-      description: Returned by get_player_state with the player's dynamic state.
-      required: [ok, player_state]
+      required: [ok, average, award_points]
       properties:
         ok: { type: boolean, const: true }
-        player_state: { $ref: '#/components/schemas/PlayerState' }
+        average: { type: number, format: float }
+        award_points: { type: integer }
+        performer:
+          type: string
+          nullable: true
+        new_score:
+          type: integer
+          nullable: true
+
+    AckTeamVoteFinished:
+      type: object
+      required: [ok, winner_team, counts]
+      properties:
+        ok: { type: boolean, const: true }
+        winner_team: { type: string }
+        counts:
+          type: object
+          additionalProperties:
+            type: integer
