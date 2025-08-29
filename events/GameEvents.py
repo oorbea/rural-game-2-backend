@@ -202,15 +202,34 @@ class GameEvents(Namespace):
         gc: GameController = current_app.extensions['game_controller']
         try:
             info = gc.get_player_info(code, username)
-            return {'ok': True, 'player_info': {
-                'username': info.username,
-                'drinking': info.drinking,
-                'smoking': info.smoking,
-                'partnered': info.partnered,
-                'virgin': info.virgin,
-                'gender': info.gender.value if hasattr(info.gender, 'value') else str(info.gender),
-                'profile_picture_url': self._profile_pic_url(code, username)
-            }}
+            info_dict = info.to_dict()
+            info_dict['profile_picture_url'] = self._profile_pic_url(code, username)
+            info_dict.pop('profile_pic', None)
+            
+            return {'ok': True, 'player_info': info_dict}
+
+        except ValueError as e:
+            return {'ok': False, 'error': str(e)}
+        except Exception as e:
+            return {'ok': False, 'error': f'An error occurred while retrieving user information.\n{str(e)}'}
+        
+    def on_get_player_state(self, data: dict):
+        try:
+            code = data['code'] = str(data['code'])
+            username = data['player_name']
+        except KeyError:
+            return {'ok': False, 'error': 'Lobby code and player_name are required to get player state.'}
+
+        schema = CodeAndUsernameSchema()
+        try:
+            data = schema.load(data)
+        except ValidationError as e:
+            return {'ok': False, 'error': str(e)}
+
+        gc: GameController = current_app.extensions['game_controller']
+        try:
+            state = gc.get_player_state(code, username)
+            return {'ok': True, 'player_state': state.to_dict()}
 
         except ValueError as e:
             return {'ok': False, 'error': str(e)}
